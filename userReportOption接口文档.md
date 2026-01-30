@@ -125,7 +125,7 @@
 
 ### cURL 示例
 ```bash
-curl -X GET "https://api.globaloneclick.org/project/userReportOption" \
+curl -X GET "https://api.globaloneclick.org/project/project/userReportOption" \
   -H "Authorization: Bearer globaloneclick"
 ```
 

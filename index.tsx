@@ -1417,82 +1417,90 @@ const App = () => {
 
 
               {step === 'mapping' && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 animate-in fade-in duration-700">
-                  <div className="bg-slate-900/50 border border-slate-800 rounded-[48px] p-12 shadow-2xl space-y-12">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-2xl font-black flex items-center gap-4 text-white"><Layers className="text-blue-400" /> 指标字段对齐</h3>
-                      <div className="flex bg-slate-800 p-1 rounded-xl">
-                        {['facebook', 'google'].map(p => (
-                          <button key={p} onClick={() => setActivePlatformTab(p as any)} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activePlatformTab === p ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400'}`}>
-                            {p}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-6">
-                      {Object.keys(mappings[activePlatformTab]).map(key => {
-                        const val = (mappings[activePlatformTab] as any)[key];
-                        if (val === undefined) return null; // Handle removed custom metrics
-                        return (
-                          <div key={key} className="space-y-2 group relative">
-                            <div className="flex items-center justify-between">
-                              <label className="block text-[8px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">{getLabelForKey(key)}</label>
-                              {key.startsWith('custom_') && (
-                                <button onClick={() => handleRemoveMetric(key)} className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-red-500 transition-all p-1">
-                                  <Trash2 size={10} />
-                                </button>
-                              )}
-                            </div>
-                            <select className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl p-4 text-[11px] font-black outline-none text-white" value={val || ''} onChange={e => {
-                              const val = e.target.value;
-                              setMappings(p => ({ ...p, [activePlatformTab]: { ...p[activePlatformTab], [key]: val } }));
-                            }}>
-                              <option value="">未选择 (Unmapped)</option>
-                              {headers.map(h => <option key={h} value={h}>{h}</option>)}
-                            </select>
-                          </div>
-                        );
-                      })}
+                <div className="space-y-8 animate-in fade-in duration-700">
 
-                      {/* Inline Add Metric Card */}
-                      <div className="space-y-2">
-                        <label className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">新增基础指标</label>
-                        {isAddingMetric ? (
-                          <div className="flex items-center gap-2">
-                            <input
-                              autoFocus
-                              className="flex-1 bg-slate-900 border-2 border-indigo-400 rounded-2xl p-3 text-[11px] font-black outline-none shadow-lg text-white"
-                              placeholder="输入指标名称..."
-                              value={newMetricName}
-                              onChange={e => setNewMetricName(e.target.value)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') handleAddMetric();
-                                if (e.key === 'Escape') setIsAddingMetric(false);
-                              }}
-                            />
-                            <button onClick={handleAddMetric} className="bg-indigo-600 text-white p-3 rounded-2xl hover:bg-indigo-700 shadow-md">
-                              <Check size={14} />
+                  {/* Top Row: Metrics & Formulas */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+                    {/* Left: Metric Mapping */}
+                    <div className="bg-slate-900/50 border border-slate-800 rounded-[48px] p-12 shadow-2xl space-y-12">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-2xl font-black flex items-center gap-4 text-white"><Layers className="text-blue-400" /> 指标字段对齐</h3>
+                        <div className="flex bg-slate-800 p-1 rounded-xl">
+                          {['facebook', 'google'].map(p => (
+                            <button key={p} onClick={() => setActivePlatformTab(p as any)} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activePlatformTab === p ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400'}`}>
+                              {p}
                             </button>
-                            <button onClick={() => setIsAddingMetric(false)} className="bg-slate-800 text-slate-400 p-3 rounded-2xl hover:bg-slate-700">
-                              <X size={14} />
+                          ))}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 gap-6">
+                        {Object.keys(mappings[activePlatformTab]).map(key => {
+                          const val = (mappings[activePlatformTab] as any)[key];
+                          if (val === undefined) return null;
+                          return (
+                            <div key={key} className="space-y-2 group relative">
+                              <div className="flex items-center justify-between">
+                                <label className="block text-[8px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">{getLabelForKey(key)}</label>
+                                {key.startsWith('custom_') && (
+                                  <button onClick={() => handleRemoveMetric(key)} className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-red-500 transition-all p-1">
+                                    <Trash2 size={10} />
+                                  </button>
+                                )}
+                              </div>
+                              <select className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl p-4 text-[11px] font-black outline-none text-white" value={val || ''} onChange={e => {
+                                const val = e.target.value;
+                                setMappings(p => ({ ...p, [activePlatformTab]: { ...p[activePlatformTab], [key]: val } }));
+                              }}>
+                                <option value="">未选择 (Unmapped)</option>
+                                {headers.map(h => <option key={h} value={h}>{h}</option>)}
+                              </select>
+                            </div>
+                          );
+                        })}
+
+                        {/* Inline Add Metric Card */}
+                        <div className="space-y-2">
+                          <label className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">新增基础指标</label>
+                          {isAddingMetric ? (
+                            <div className="flex items-center gap-2">
+                              <input
+                                autoFocus
+                                className="flex-1 bg-slate-900 border-2 border-indigo-400 rounded-2xl p-3 text-[11px] font-black outline-none shadow-lg text-white"
+                                placeholder="输入指标名称..."
+                                value={newMetricName}
+                                onChange={e => setNewMetricName(e.target.value)}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') handleAddMetric();
+                                  if (e.key === 'Escape') setIsAddingMetric(false);
+                                }}
+                              />
+                              <button onClick={handleAddMetric} className="bg-indigo-600 text-white p-3 rounded-2xl hover:bg-indigo-700 shadow-md">
+                                <Check size={14} />
+                              </button>
+                              <button onClick={() => setIsAddingMetric(false)} className="bg-slate-800 text-slate-400 p-3 rounded-2xl hover:bg-slate-700">
+                                <X size={14} />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setIsAddingMetric(true)}
+                              className="w-full border-2 border-dashed border-slate-700 rounded-2xl p-4 flex items-center justify-center gap-2 text-slate-400 hover:border-indigo-400 hover:text-indigo-400 hover:bg-indigo-900/20 transition-all text-[11px] font-black"
+                            >
+                              <Plus size={14} /> 新增对齐指标
                             </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => setIsAddingMetric(true)}
-                            className="w-full border-2 border-dashed border-slate-700 rounded-2xl p-4 flex items-center justify-center gap-2 text-slate-400 hover:border-indigo-400 hover:text-indigo-400 hover:bg-indigo-900/20 transition-all text-[11px] font-black"
-                          >
-                            <Plus size={14} /> 新增对齐指标
-                          </button>
-                        )}
+                          )}
+                        </div>
                       </div>
                     </div>
-                    <div className="pt-12 border-t border-slate-800 space-y-8">
+
+                    {/* Right: Formula Config */}
+                    <div className="bg-slate-900/50 border border-slate-800 rounded-[48px] p-12 shadow-2xl space-y-8 flex flex-col">
                       <div className="flex items-center justify-between">
                         <h3 className="text-xl font-black flex items-center gap-4 text-white"><Calculator className="text-indigo-400" /> 公式字段配置</h3>
                         <button className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-[10px] font-black hover:bg-indigo-700 transition" onClick={() => openFormulaModal()}>+ 新增公式</button>
                       </div>
-                      <div className="grid grid-cols-1 gap-4">
+                      <div className="grid grid-cols-1 gap-4 flex-1 content-start">
                         {formulas.map(f => (
                           <div key={f.id} className="p-6 bg-slate-800 rounded-3xl border border-slate-700 flex items-center justify-between group">
                             <div>
@@ -1505,114 +1513,125 @@ const App = () => {
                             </div>
                           </div>
                         ))}
+                        {formulas.length === 0 && (
+                          <div className="h-full flex flex-col items-center justify-center text-slate-500 opacity-50 space-y-2 py-12 border-2 border-dashed border-slate-800 rounded-3xl">
+                            <Calculator size={32} />
+                            <p className="text-xs font-bold">暂无公式，点击右上角添加</p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
+
+                  {/* Bottom Row: Dimensions */}
                   <div className="bg-slate-900/50 border border-slate-800 rounded-[48px] p-12 shadow-2xl space-y-12">
                     <div className="flex items-center justify-between">
                       <h3 className="text-2xl font-black flex items-center gap-4 text-white"><Split className="text-purple-400" /> 维度深度解析</h3>
                     </div>
-                    <div className="bg-slate-800 rounded-3xl p-6 space-y-6 border border-slate-700 shadow-inner">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2"><TableIcon size={12} /> NAMING CONVENTION SAMPLES</p>
 
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                      {/* Left Side: Samples */}
+                      <div className="lg:col-span-1 bg-slate-800 rounded-3xl p-6 space-y-6 border border-slate-700 shadow-inner h-fit">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2"><TableIcon size={12} /> NAMING CONVENTION SAMPLES</p>
+                        <div className="space-y-4">
+                          <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                            <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Campaign Name Sample</label>
+                            <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.campaign}>{namingSamples.campaign || 'N/A'}</div>
+                          </div>
+                          <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                            <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Ad Set Name Sample</label>
+                            <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.adSet}>{namingSamples.adSet || 'N/A'}</div>
+                          </div>
+                          <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                            <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Ad Name Sample</label>
+                            <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.ad}>{namingSamples.ad || 'N/A'}</div>
+                          </div>
+                        </div>
+                      </div>
 
-                      <div className="space-y-6">
-                        <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                          <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Campaign Name Sample</label>
-                          <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm">{namingSamples.campaign || 'N/A'}</div>
-                        </div>
-                        <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                          <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Ad Set Name Sample</label>
-                          <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm">{namingSamples.adSet || 'N/A'}</div>
-                        </div>
-                        <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                          <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Ad Name Sample</label>
-                          <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm">{namingSamples.ad || 'N/A'}</div>
+                      {/* Right Side: Dimension Rules */}
+                      <div className="lg:col-span-2 space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                        {allDimensions.map(dim => {
+                          const existing = dimConfigs.find(d => d.label === dim);
+                          const currentSource = existing?.source || 'campaign';
+                          const currentDelimiter = existing?.delimiter || '_';
+                          const sampleStr = namingSamples[currentSource as 'campaign' | 'adSet' | 'ad'] || '';
+                          const sampleParts = sampleStr ? sampleStr.split(currentDelimiter) : [];
+                          return (
+                            <div key={dim} className="flex flex-col md:flex-row md:items-center gap-4 p-5 bg-slate-800 rounded-3xl border border-slate-700 shadow-sm group hover:border-purple-700 transition-all relative">
+                              <div className="md:w-32 flex items-center justify-between shrink-0">
+                                <span className="text-[11px] font-black text-slate-200 uppercase tracking-widest">{dim}</span>
+                                <button onClick={() => handleRemoveDimension(dim)} className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-red-500 transition-all p-1 mr-2">
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                              <div className="flex flex-1 gap-3">
+                                <select className="flex-[3] bg-slate-900 text-[11px] font-black px-5 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.source || ''} onChange={e => {
+                                  const source = e.target.value as any;
+                                  if (source) setDimConfigs(p => [...p.filter(x => x.label !== dim), { label: dim, source, index: existing?.index || 0 }]);
+                                }}>
+                                  <option value="">来源字段 (Source)</option>
+                                  <option value="campaign">Campaign (Naming)</option>
+                                  <option value="adSet">Ad Set (Naming)</option>
+                                  <option value="ad">Ad (Naming)</option>
+                                  <option value="platform">Platform</option>
+                                </select>
+                                <select className="flex-[1] min-w-[80px] bg-slate-900 text-[11px] font-black px-3 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-center text-white" value={existing?.delimiter || '_'} onChange={e => {
+                                  const delimiter = e.target.value;
+                                  if (existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, delimiter }]);
+                                  else setDimConfigs(p => [...p, { label: dim, source: 'campaign', index: 0, delimiter }]);
+                                }}>
+                                  <option value="_">_</option>
+                                  <option value="-">-</option>
+                                </select>
+                                <select className="flex-[2] min-w-[140px] bg-slate-900 text-[11px] font-black px-5 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.index ?? ''} onChange={e => {
+                                  const index = parseInt(e.target.value);
+                                  if (!isNaN(index) && existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, index }]);
+                                  else if (!isNaN(index)) setDimConfigs(p => [...p, { label: dim, source: 'campaign', index, delimiter: '_' }]);
+                                }}>
+                                  <option value="">索引 (Index)</option>
+                                  {sampleParts.length > 0 ? (
+                                    sampleParts.map((part, i) => (
+                                      <option key={i} value={i}>Part {i} ({part})</option>
+                                    ))
+                                  ) : (
+                                    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => <option key={i} value={i}>{i}</option>)
+                                  )}
+                                </select>
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                        <div className="p-2">
+                          {isAddingDimension ? (
+                            <div className="flex items-center gap-4 p-5 bg-slate-800 rounded-3xl border-2 border-indigo-700 border-dashed animate-in fade-in zoom-in duration-300">
+                              <span className="md:w-32 text-[10px] font-black text-indigo-400 uppercase tracking-widest shrink-0">New Dimension</span>
+                              <div className="flex flex-1 gap-3">
+                                <input
+                                  autoFocus
+                                  className="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-5 py-4 text-[11px] font-black outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-900/20 transition-all text-white"
+                                  placeholder="输入自定义维度名称..."
+                                  value={newDimensionName}
+                                  onChange={e => setNewDimensionName(e.target.value)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') handleAddDimension();
+                                    if (e.key === 'Escape') setIsAddingDimension(false);
+                                  }}
+                                />
+                                <button onClick={handleAddDimension} className="bg-indigo-600 text-white px-6 rounded-2xl hover:bg-indigo-700 shadow-lg shadow-indigo-900/20 transition-all font-black text-xs min-w-[80px]">确认</button>
+                                <button onClick={() => setIsAddingDimension(false)} className="bg-slate-900 text-slate-400 px-6 rounded-2xl hover:bg-slate-800 border border-slate-700 transition-all font-black text-xs min-w-[80px]">取消</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button onClick={() => setIsAddingDimension(true)} className="w-full py-5 border-2 border-dashed border-slate-700 rounded-3xl flex items-center justify-center gap-2 text-slate-400 hover:text-indigo-400 hover:border-indigo-700 hover:bg-indigo-900/20 transition-all font-black text-xs uppercase tracking-widest group">
+                              <Plus size={16} className="group-hover:scale-110 transition-transform" /> 增加自定义维度
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
-                    <div className="space-y-4 h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                      {allDimensions.map(dim => {
-                        const existing = dimConfigs.find(d => d.label === dim);
-                        const currentSource = existing?.source || 'campaign';
-                        const currentDelimiter = existing?.delimiter || '_'; // Default to '_'
-                        const sampleStr = namingSamples[currentSource as 'campaign' | 'adSet' | 'ad'] || '';
-                        const sampleParts = sampleStr ? sampleStr.split(currentDelimiter) : [];
-                        return (
-                          <div key={dim} className="flex flex-col md:flex-row md:items-center gap-4 p-5 bg-slate-800 rounded-3xl border border-slate-700 shadow-sm group hover:border-purple-700 transition-all relative">
-                            <div className="md:w-32 flex items-center justify-between shrink-0">
-                              <span className="text-[11px] font-black text-slate-200 uppercase tracking-widest">{dim}</span>
-                              <button onClick={() => handleRemoveDimension(dim)} className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-red-500 transition-all p-1 mr-2">
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
-                            <div className="flex flex-1 gap-3">
-                              <select className="flex-[3] bg-slate-900 text-[11px] font-black px-5 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.source || ''} onChange={e => {
-                                const source = e.target.value as any;
-                                if (source) setDimConfigs(p => [...p.filter(x => x.label !== dim), { label: dim, source, index: existing?.index || 0 }]);
-                              }}>
-                                <option value="">来源字段 (Source)</option>
-                                <option value="campaign">Campaign (Naming)</option>
-                                <option value="adSet">Ad Set (Naming)</option>
-                                <option value="ad">Ad (Naming)</option>
-                                <option value="platform">Platform</option>
-                              </select>
-                              {/* Delimiter Selector */}
-                              <select className="flex-[1] min-w-[80px] bg-slate-900 text-[11px] font-black px-3 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-center text-white" value={existing?.delimiter || '_'} onChange={e => {
-                                const delimiter = e.target.value;
-                                if (existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, delimiter }]);
-                                else setDimConfigs(p => [...p, { label: dim, source: 'campaign', index: 0, delimiter }]);
-                              }}>
-                                <option value="_">_</option>
-                                <option value="-">-</option>
-                              </select>
-                              <select className="flex-[2] min-w-[140px] bg-slate-900 text-[11px] font-black px-5 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.index ?? ''} onChange={e => {
-                                const index = parseInt(e.target.value);
-                                if (!isNaN(index) && existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, index }]);
-                                else if (!isNaN(index)) setDimConfigs(p => [...p, { label: dim, source: 'campaign', index, delimiter: '_' }]);
-                              }}>
-                                <option value="">索引 (Index)</option>
-                                {sampleParts.length > 0 ? (
-                                  sampleParts.map((part, i) => (
-                                    <option key={i} value={i}>Part {i} ({part})</option>
-                                  ))
-                                ) : (
-                                  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => <option key={i} value={i}>{i}</option>)
-                                )}
-                              </select>
-                            </div>
-                          </div>
-                        );
-                      })}
 
-                      {/* Add Custom Dimension UI */}
-                      <div className="p-2">
-                        {isAddingDimension ? (
-                          <div className="flex items-center gap-4 p-5 bg-slate-800 rounded-3xl border-2 border-indigo-700 border-dashed animate-in fade-in zoom-in duration-300">
-                            <span className="md:w-32 text-[10px] font-black text-indigo-400 uppercase tracking-widest shrink-0">New Dimension</span>
-                            <div className="flex flex-1 gap-3">
-                              <input
-                                autoFocus
-                                className="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-5 py-4 text-[11px] font-black outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-900/20 transition-all text-white"
-                                placeholder="输入自定义维度名称..."
-                                value={newDimensionName}
-                                onChange={e => setNewDimensionName(e.target.value)}
-                                onKeyDown={e => {
-                                  if (e.key === 'Enter') handleAddDimension();
-                                  if (e.key === 'Escape') setIsAddingDimension(false);
-                                }}
-                              />
-                              <button onClick={handleAddDimension} className="bg-indigo-600 text-white px-6 rounded-2xl hover:bg-indigo-700 shadow-lg shadow-indigo-900/20 transition-all font-black text-xs min-w-[80px]">确认</button>
-                              <button onClick={() => setIsAddingDimension(false)} className="bg-slate-900 text-slate-400 px-6 rounded-2xl hover:bg-slate-800 border border-slate-700 transition-all font-black text-xs min-w-[80px]">取消</button>
-                            </div>
-                          </div>
-                        ) : (
-                          <button onClick={() => setIsAddingDimension(true)} className="w-full py-5 border-2 border-dashed border-slate-700 rounded-3xl flex items-center justify-center gap-2 text-slate-400 hover:text-indigo-400 hover:border-indigo-700 hover:bg-indigo-900/20 transition-all font-black text-xs uppercase tracking-widest group">
-                            <Plus size={16} className="group-hover:scale-110 transition-transform" /> 增加自定义维度
-                          </button>
-                        )}
-                      </div>
-                    </div>
                     <div className="pt-8 border-t border-slate-800 flex gap-4">
                       <button onClick={() => setStep('dataSourceConfig')} className="bg-slate-800 text-slate-400 px-8 py-4 rounded-[24px] text-xs font-black">返回上一步</button>
                       <button onClick={() => setStep('dashboard')} className="flex-1 bg-indigo-600 text-white py-4 rounded-[24px] text-xs font-black shadow-xl hover:bg-indigo-700 transition-all">生成智投分析面板</button>
