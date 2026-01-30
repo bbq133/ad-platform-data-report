@@ -46,7 +46,8 @@ import {
   ChevronUp,
   Settings as SettingsIcon,
   GripVertical,
-  LogOut
+  LogOut,
+  Save
 } from 'lucide-react';
 import {
   XAxis,
@@ -65,7 +66,7 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { AI_CONFIG, generateAnalysisPrompt, cleanAiResponseText } from './ai-config';
 import { API_CONFIG, getDefaultDateRange, ProjectOption } from './api-config';
-import { fetchAllPlatformsData, transformApiDataToRawData, fetchProjectList, extractUniqueAccounts } from './api-service';
+import { fetchAllPlatformsData, transformApiDataToRawData, fetchProjectList, extractUniqueAccounts, fetchUserConfig, saveUserConfig } from './api-service';
 import LoginPage from './LoginPage'; // New: Import LoginPage
 import { getUserSession, saveUserSession, clearUserSession, filterProjectsByKeywords, UserInfo, fetchSystemConfig, saveSystemConfig, getSystemConfig } from './auth-service'; // New: Import auth services
 
@@ -427,6 +428,67 @@ const App = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+
+  // --- Auto-Load User Configuration ---
+  useEffect(() => {
+    if (isLoggedIn && currentUser && selectedProject?.projectId) {
+      const loadUserConfigs = async () => {
+        setIsLoadingData(true);
+        try {
+          // 1. Load Metric Mappings
+          const savedMappings = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'metrics');
+          if (savedMappings) {
+            setMappings(savedMappings);
+            console.log('Loaded metric mappings from cloud');
+          }
+
+          // 2. Load Dimension Configs
+          const savedDimConfigs = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'dimensions');
+          if (savedDimConfigs) {
+            setDimConfigs(savedDimConfigs);
+            console.log('Loaded dimension configs from cloud');
+          }
+
+          // 3. Load Formula Configs
+          const savedFormulas = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'formulas');
+          if (savedFormulas) {
+            setFormulas(savedFormulas);
+            console.log('Loaded formula configs from cloud');
+          }
+        } catch (e) {
+          console.error("Failed to auto-load configs:", e);
+        } finally {
+          setIsLoadingData(false);
+        }
+      };
+      loadUserConfigs();
+    }
+  }, [selectedProject?.projectId, isLoggedIn, currentUser]);
+
+  // --- Save Configuration Handler ---
+  const handleSaveConfig = async () => {
+    if (!currentUser || !selectedProject?.projectId) return;
+
+    setIsLoadingData(true);
+    try {
+      const p1 = saveUserConfig(currentUser.username, selectedProject.projectId, 'metrics', mappings);
+      const p2 = saveUserConfig(currentUser.username, selectedProject.projectId, 'dimensions', dimConfigs);
+      const p3 = saveUserConfig(currentUser.username, selectedProject.projectId, 'formulas', formulas);
+
+      const [res1, res2, res3] = await Promise.all([p1, p2, p3]);
+
+      if (res1 && res2 && res3) {
+        alert('配置已保存到云端 (Google Sheets) ✅');
+      } else {
+        alert('保存失败，请重试 ❌');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('保存出错');
+    } finally {
+      setIsLoadingData(false);
+    }
+  };
   // Extract samples for the current platform
   const namingSamples = useMemo(() => {
     if (!rawData.length) return { campaign: '', adSet: '', ad: '' };
@@ -1132,6 +1194,29 @@ const App = () => {
 
           {/* Right: Actions */}
           <div className="flex items-center gap-4">
+            {/* Edit Config Button (Visible in Dashboard Step) */}
+            {step === 'dashboard' && (
+              <button
+                onClick={() => setStep('mapping')}
+                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-5 py-2.5 rounded-xl text-xs font-black transition-all shadow-sm active:scale-95 mr-2"
+              >
+                <Settings2 size={14} />
+                调整指标配置
+              </button>
+            )}
+
+            {/* Save Config Button (Visible in Mapping Step) */}
+            {/* Save Config Button (Visible in Mapping Step) */}
+            {step === 'mapping' && (
+              <button
+                onClick={handleSaveConfig}
+                disabled={isLoadingData}
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl text-xs font-black transition-all shadow-lg shadow-indigo-500/20 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed mr-2"
+              >
+                {isLoadingData ? <RefreshCcw className="animate-spin" size={14} /> : <Save size={14} />}
+                {isLoadingData ? 'Saving...' : '保存配置'}
+              </button>
+            )}
             {/* User Profile & Logout */}
             <div className="flex items-center gap-3 pl-4 border-l border-slate-800">
               <div className="flex flex-col items-end">
@@ -1426,12 +1511,16 @@ const App = () => {
                     <div className="bg-slate-900/50 border border-slate-800 rounded-[48px] p-12 shadow-2xl space-y-12">
                       <div className="flex items-center justify-between">
                         <h3 className="text-2xl font-black flex items-center gap-4 text-white"><Layers className="text-blue-400" /> 指标字段对齐</h3>
-                        <div className="flex bg-slate-800 p-1 rounded-xl">
-                          {['facebook', 'google'].map(p => (
-                            <button key={p} onClick={() => setActivePlatformTab(p as any)} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activePlatformTab === p ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400'}`}>
-                              {p}
-                            </button>
-                          ))}
+
+                        <div className="flex items-center gap-4">
+
+                          <div className="flex bg-slate-800 p-1 rounded-xl">
+                            {['facebook', 'google'].map(p => (
+                              <button key={p} onClick={() => setActivePlatformTab(p as any)} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activePlatformTab === p ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400'}`}>
+                                {p}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       </div>
                       <div className="grid grid-cols-1 gap-6">
@@ -1636,6 +1725,7 @@ const App = () => {
                       <button onClick={() => setStep('dataSourceConfig')} className="bg-slate-800 text-slate-400 px-8 py-4 rounded-[24px] text-xs font-black">返回上一步</button>
                       <button onClick={() => setStep('dashboard')} className="flex-1 bg-indigo-600 text-white py-4 rounded-[24px] text-xs font-black shadow-xl hover:bg-indigo-700 transition-all">生成智投分析面板</button>
                     </div>
+
                   </div>
                 </div>
               )}

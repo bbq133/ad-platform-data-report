@@ -3,7 +3,7 @@
  * 负责数据获取和格式转换
  */
 
-import { API_CONFIG, ApiRequestParams, ApiDataRow, ApiResponse, ProjectOption, ProjectListResponse } from './api-config';
+import { API_CONFIG, GOOGLE_SHEETS_CONFIG, ApiRequestParams, ApiDataRow, ApiResponse, ProjectOption, ProjectListResponse } from './api-config';
 
 /**
  * 从 API 获取广告数据
@@ -176,4 +176,50 @@ export function extractUniqueAccounts(data: ApiDataRow[]): { id: string; name: s
     });
 
     return Array.from(accountMap.entries()).map(([id, name]) => ({ id, name }));
+}
+
+/**
+ * 获取用户配置 (Metrics Mapping 或 Dimension Configs)
+ */
+export async function fetchUserConfig(username: string, projectId: string | number, type: 'metrics' | 'dimensions' | 'formulas'): Promise<any> {
+    const url = `${GOOGLE_SHEETS_CONFIG.GAS_API_URL}?action=getConfig&user=${encodeURIComponent(username)}&projectId=${projectId}&type=${type}`;
+    try {
+        const response = await fetch(url);
+        const result = await response.json();
+        if (result.status === 'success') {
+            return result.data;
+        }
+        return null;
+    } catch (e) {
+        console.error('Failed to fetch user config:', e);
+        return null; // Fail gracefully
+    }
+}
+
+/**
+ * 保存用户配置
+ */
+export async function saveUserConfig(username: string, projectId: string | number, type: 'metrics' | 'dimensions' | 'formulas', data: any): Promise<boolean> {
+    const url = GOOGLE_SHEETS_CONFIG.GAS_API_URL;
+    try {
+        const payload = {
+            user: username,
+            projectId,
+            type,
+            data
+        };
+        const response = await fetch(url, {
+            method: 'POST',
+            // 使用 text/plain 避免 CORS 复杂请求 (preflight)
+            headers: {
+                'Content-Type': 'text/plain;charset=utf-8',
+            },
+            body: JSON.stringify(payload)
+        });
+        const result = await response.json();
+        return result.status === 'success';
+    } catch (e) {
+        console.error('Failed to save user config:', e);
+        return false;
+    }
 }

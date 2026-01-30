@@ -19,6 +19,8 @@ export const GOOGLE_SHEETS_CONFIG = {
     SHEET_ID: '1rdNtMU_IfrhKPDl6xqXPFVn1vf-rm85zTVvR5ArSmWc', // 替换为实际的 Google Sheets ID
     SHEET_NAME: 'UserPermissions',
     CONFIG_SHEET_NAME: 'SystemConfig',
+    // 替换为您部署的 Google Apps Script Web App URL
+    GAS_API_URL: 'https://script.google.com/macros/s/AKfycbwSZZd6UW7nnMnW6Ey5glNNhjhEOZ47zmRjBTrQk9xBIp2FFzmefGg8z7Fa0kB9der4og/exec',
     get API_URL() {
         return `https://docs.google.com/spreadsheets/d/${this.SHEET_ID}/gviz/tq?tqx=out:json`;
     }
