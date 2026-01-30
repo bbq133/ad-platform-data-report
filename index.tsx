@@ -1581,8 +1581,8 @@ const App = () => {
                                   if (existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, delimiter }]);
                                   else setDimConfigs(p => [...p, { label: dim, source: 'campaign', index: 0, delimiter }]);
                                 }}>
-                                  <option value="_">_</option>
-                                  <option value="-">-</option>
+                                  <option value="_">_ (下划线 | Underscore)</option>
+                                  <option value="-">- (中划线 | Hyphen)</option>
                                 </select>
                                 <select className="flex-[2] min-w-[140px] bg-slate-900 text-[11px] font-black px-5 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.index ?? ''} onChange={e => {
                                   const index = parseInt(e.target.value);
