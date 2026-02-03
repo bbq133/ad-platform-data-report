@@ -7,7 +7,7 @@ export default defineConfig(({ mode }) => {
   return {
     server: {
       port: 5001,
-      host: '0.0.0.0',
+      host: 'localhost', // 使用 localhost 避免 uv_interface_addresses 报错
     },
     plugins: [react()],
     define: {

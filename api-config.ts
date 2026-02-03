@@ -53,6 +53,8 @@ export interface ApiRequestParams {
     platform: 'facebook' | 'google';
     filterCampaignIdList?: string[];
     filterAccountIdList?: string[];
+    /** 分段维度：传 age_date 可返回年龄，传 gender_adset_date 可返回性别（BiSegmentEnum） */
+    segmentList?: string[];
 }
 
 // API 返回数据行类型

@@ -26,6 +26,11 @@ export async function fetchAdData(params: ApiRequestParams): Promise<ApiDataRow[
         queryParams.append('filterAccountIdList', id)
     );
 
+    // 分段维度：age_date 返回年龄，gender_adset_date 返回性别（接口需带 segment 才有对应字段）
+    params.segmentList?.forEach(seg =>
+        queryParams.append('segment', seg)
+    );
+
     const url = `${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.GET_ALL_FILTER_DATA}?${queryParams}`;
 
     const response = await fetch(url, {
@@ -80,18 +85,21 @@ export async function fetchProjectList(): Promise<ProjectOption[]> {
 
 /**
  * 同时获取 Facebook 和 Google 数据
+ * @param segmentList 分段维度：传 ['age_date'] 可返回年龄，['gender_adset_date'] 可返回性别，两者都传则都有
  */
 export async function fetchAllPlatformsData(
     projectId: number,
     startDate: string,
     endDate: string,
-    filterAccountIdList?: string[]
+    filterAccountIdList?: string[],
+    segmentList?: string[]
 ): Promise<ApiDataRow[]> {
     const baseParams = {
         projectId,
         startDate,
         endDate,
-        filterAccountIdList
+        filterAccountIdList,
+        segmentList
     };
 
     // 并行请求两个平台的数据
@@ -111,8 +119,11 @@ export function transformApiDataToRawData(apiData: ApiDataRow[]): Record<string,
     return apiData.map(row => {
         const isGoogle = row.platform?.toLowerCase().includes('google');
         const commonData = {
+            // 内部标识字段 (不用于映射下拉)
+            '__platform': row.platform ? String(row.platform).toLowerCase() : '',
+            '__campaignAdvertisingType': row.campaignAdvertisingType ? String(row.campaignAdvertisingType).toUpperCase() : '',
+
             // 基础标识字段
-            'Platform Identification': row.platform || '',
             'Campaign Name': row.campaignName || '',
             'Ad Set Name': row.adsetName || '',
             'Ad Name': row.adName || '',
@@ -145,6 +156,10 @@ export function transformApiDataToRawData(apiData: ApiDataRow[]): Record<string,
 
             // GA 指标
             'Total site sale value': row.gaConvertedRevenue ?? 0,
+
+            // 年龄/性别（需接口传 segment=age_date、segment=gender_adset_date 才有值）
+            'Age': row.ageRange ?? '',
+            'Gender': row.genderType ?? '',
 
             // 原始数据保留 (用于高级分析)
             '_raw': row
@@ -181,7 +196,11 @@ export function extractUniqueAccounts(data: ApiDataRow[]): { id: string; name: s
 /**
  * 获取用户配置 (Metrics Mapping 或 Dimension Configs)
  */
-export async function fetchUserConfig(username: string, projectId: string | number, type: 'metrics' | 'dimensions' | 'formulas'): Promise<any> {
+export async function fetchUserConfig(
+    username: string,
+    projectId: string | number,
+    type: 'metrics' | 'dimensions' | 'formulas' | 'pivotPresets' | 'bi'
+): Promise<any> {
     const url = `${GOOGLE_SHEETS_CONFIG.GAS_API_URL}?action=getConfig&user=${encodeURIComponent(username)}&projectId=${projectId}&type=${type}`;
     try {
         const response = await fetch(url);
@@ -199,7 +218,12 @@ export async function fetchUserConfig(username: string, projectId: string | numb
 /**
  * 保存用户配置
  */
-export async function saveUserConfig(username: string, projectId: string | number, type: 'metrics' | 'dimensions' | 'formulas', data: any): Promise<boolean> {
+export async function saveUserConfig(
+    username: string,
+    projectId: string | number,
+    type: 'metrics' | 'dimensions' | 'formulas' | 'pivotPresets' | 'bi',
+    data: any
+): Promise<boolean> {
     const url = GOOGLE_SHEETS_CONFIG.GAS_API_URL;
     try {
         const payload = {

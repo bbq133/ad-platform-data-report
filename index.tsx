@@ -80,6 +80,9 @@ interface MappingConfig {
   [key: string]: string | undefined;
 }
 
+type GoogleType = 'SEARCH' | 'DEMAND_GEN' | 'PERFORMANCE_MAX';
+type PivotPlatformScope = 'meta' | 'google_search' | 'google_demand_gen' | 'google_performance_max';
+
 interface FormulaField {
   id: string;
   name: string;
@@ -90,15 +93,58 @@ interface FormulaField {
 
 interface DimensionConfig {
   label: string;
-  source: 'campaign' | 'adSet' | 'ad' | 'platform';
+  source: 'campaign' | 'adSet' | 'ad' | 'platform' | 'age' | 'gender';
   index: number;
   delimiter?: string;
 }
+
+/** 单条透视筛选器配置（用于保存到预设） */
+interface PivotFilterPreset {
+  fieldKey: string;
+  label: string;
+  mode: 'multi' | 'contains' | 'not_contains' | 'date_range';
+  selectedValues: string[];
+  textValue: string;
+  dateRange: { start: string; end: string };
+}
+
+/** 透视报告预设：用户保存的命名配置 */
+interface PivotPreset {
+  id: string;
+  name: string;
+  filters: PivotFilterPreset[];
+  rows: string[];
+  columns: string[];
+  values: string[];
+  display: { showSubtotal: boolean; showGrandTotal: boolean; totalAxis: 'row' | 'column' };
+  platformScopes: PivotPlatformScope[];
+}
+
+const PIVOT_PRESETS_STORAGE_PREFIX = 'pivotPresets_';
 
 const INITIAL_DIMENSIONS = [
   "国家", "广告类型", "AI vs AO",
   "兴趣组人群", "素材类型", "素材内容", "折扣类型", "视觉类型", "视觉细节"
 ];
+
+const BUILTIN_BI_CARD_OPTIONS = [
+  { id: 'kpi:total_cost', label: 'Total Cost' },
+  { id: 'kpi:total_leads', label: 'Total Leads' },
+  { id: 'kpi:avg_cpl', label: 'Avg CPL' },
+  { id: 'kpi:avg_ctr', label: 'Avg CTR' },
+  { id: 'kpi:sub_rate', label: 'Sub Rate' }
+] as const;
+type BiCardKey = string;
+const DEFAULT_BI_CARD_ORDER: BiCardKey[] = BUILTIN_BI_CARD_OPTIONS.map(o => o.id);
+
+const GOOGLE_TYPES: GoogleType[] = ['SEARCH', 'DEMAND_GEN', 'PERFORMANCE_MAX'];
+const PIVOT_PLATFORM_OPTIONS: Array<{ key: PivotPlatformScope; label: string }> = [
+  { key: 'meta', label: 'Meta' },
+  { key: 'google_search', label: 'Google Search' },
+  { key: 'google_demand_gen', label: 'Google Demand Gen' },
+  { key: 'google_performance_max', label: 'Google Performance Max' },
+];
+const DEFAULT_PIVOT_PLATFORM_SCOPES: PivotPlatformScope[] = PIVOT_PLATFORM_OPTIONS.map(o => o.key);
 
 const BASE_METRICS = [
   'cost', 'leads', 'impressions', 'reach', 'clicks', 'linkClicks',
@@ -118,9 +164,12 @@ const DEFAULT_FORMULAS: FormulaField[] = [
   { id: 'f_cpatc', name: 'CPATC', formula: 'cost / addToCart', unit: '$', isDefault: true },
   { id: 'f_freq', name: 'Frequency', formula: 'impressions / reach', unit: '', isDefault: true },
   { id: 'f_aov', name: 'AOV', formula: 'conversionValue / conversion', unit: '$', isDefault: true },
+  { id: 'f_roi', name: 'ROI', formula: 'conversionValue / cost', unit: '', isDefault: true },
   { id: 'f_cpc', name: 'Cost per checkout', formula: 'cost / checkout', unit: '$', isDefault: true },
   { id: 'f_cps', name: 'Cost per subscription', formula: 'cost / subscribe', unit: '$', isDefault: true },
 ];
+
+const DEFAULT_ROI_FORMULA: FormulaField = { id: 'f_roi', name: 'ROI', formula: 'conversionValue / cost', unit: '', isDefault: true };
 
 const METRIC_COLORS: Record<string, string> = {
   'cost': '#3b82f6',
@@ -169,6 +218,29 @@ const formatReportHtml = (rawText: string) => {
   return rawText.split('\n').map(line => `<p class="mb-4">${line}</p>`).join('');
 };
 
+const normalizeDimConfigs = (input: any): DimensionConfig[] => {
+  let data = input;
+  if (typeof data === 'string') {
+    try {
+      data = JSON.parse(data);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(data)) return [];
+  const allowedSources = new Set(['campaign', 'adSet', 'ad', 'platform', 'age', 'gender']);
+  return data
+    .map((item: any) => {
+      if (!item || typeof item.label !== 'string') return null;
+      const source = String(item.source || '').trim();
+      if (!allowedSources.has(source)) return null;
+      const index = Number.isFinite(item.index) ? Number(item.index) : 0;
+      const delimiter = typeof item.delimiter === 'string' && item.delimiter.length > 0 ? item.delimiter : '_';
+      return { label: item.label.trim(), source: source as DimensionConfig['source'], index, delimiter };
+    })
+    .filter(Boolean) as DimensionConfig[];
+};
+
 // --- Main App ---
 
 const App = () => {
@@ -215,7 +287,7 @@ const App = () => {
     setProjectList([]);
     setSelectedProject(null);
     setRawData([]);
-    setHeaders([]);
+    setHeadersBySource({ facebook: [], google: { SEARCH: [], DEMAND_GEN: [], PERFORMANCE_MAX: [] } });
     setDimConfigs([]);
     setActiveDashboardDim('');
     setAvailableDates([]);
@@ -226,16 +298,27 @@ const App = () => {
     setIsLoadingAccounts(false);
     setAvailableAccounts([]);
     setApiDateRange(getDefaultDateRange());
+    setReportDateRangeBounds(null);
     setFormulas(DEFAULT_FORMULAS);
     setCustomMetricLabels({});
     setMappings({
       facebook: {
-        platform: '', campaign: '', adSet: '', ad: '', cost: '', leads: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
+        campaign: '', adSet: '', ad: '', cost: '', leads: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
         conversionValue: '', conversion: '', addToCart: '', landingPageViews: '', checkout: '', subscribe: ''
       },
       google: {
-        platform: '', campaign: '', adSet: '', ad: '', cost: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
-        conversionValue: '', conversion: '', addToCart: '', landingPageViews: ''
+        SEARCH: {
+          campaign: '', adSet: '', ad: '', cost: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
+          conversionValue: '', conversion: '', addToCart: '', landingPageViews: ''
+        },
+        DEMAND_GEN: {
+          campaign: '', adSet: '', ad: '', cost: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
+          conversionValue: '', conversion: '', addToCart: '', landingPageViews: ''
+        },
+        PERFORMANCE_MAX: {
+          campaign: '', adSet: '', ad: '', cost: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
+          conversionValue: '', conversion: '', addToCart: '', landingPageViews: ''
+        }
       }
     });
   };
@@ -243,7 +326,13 @@ const App = () => {
   // --- State for App ---
   const [step, setStep] = useState<'upload' | 'mapping' | 'dashboard' | 'dataSourceConfig'>('upload'); // Added dataSourceConfig step
   const [rawData, setRawData] = useState<RawDataRow[]>([]);
-  const [headers, setHeaders] = useState<string[]>([]);
+  const [headersBySource, setHeadersBySource] = useState<{
+    facebook: string[];
+    google: Record<GoogleType, string[]>;
+  }>({
+    facebook: [],
+    google: { SEARCH: [], DEMAND_GEN: [], PERFORMANCE_MAX: [] }
+  });
 
   // States
   const [selectedProject, setSelectedProject] = useState<ProjectOption | null>(null); // Changed to store full ProjectOption
@@ -257,6 +346,8 @@ const App = () => {
   const [apiError, setApiError] = useState<string>('');
   const [availableAccounts, setAvailableAccounts] = useState<{ id: string; name: string }[]>([]);
   const [apiDateRange, setApiDateRange] = useState(getDefaultDateRange());
+  // 首次获取报告时的时间范围，报告面板内的时间选择只能在此范围内
+  const [reportDateRangeBounds, setReportDateRangeBounds] = useState<{ start: string; end: string } | null>(null);
 
   // Project Selector States
   const [projectList, setProjectList] = useState<ProjectOption[]>([]);
@@ -281,6 +372,7 @@ const App = () => {
 
   const [dashboardPlatformFilter, setDashboardPlatformFilter] = useState<'all' | 'facebook' | 'google'>('all');
   const [activePlatformTab, setActivePlatformTab] = useState<'facebook' | 'google'>('facebook');
+  const [activeGoogleType, setActiveGoogleType] = useState<GoogleType>('SEARCH');
 
   const [customMetricLabels, setCustomMetricLabels] = useState<Record<string, string>>({});
   const [newMetricName, setNewMetricName] = useState('');
@@ -288,8 +380,7 @@ const App = () => {
 
   const getLabelForKey = (key: string) => {
     const labels: Record<string, string> = {
-      platform: 'Platform Identification',
-      campaign: 'Campaign Name', adSet: 'Ad Set Name', ad: 'Ad Name', cost: 'Amount spent (USD)', leads: 'Leads',
+      campaign: 'Campaign Name', adSet: 'Ad Set Name', ad: 'Ad Name', age: 'Age', gender: 'Gender', cost: 'Amount spent (USD)', leads: 'Leads',
       impressions: 'Impressions', reach: 'Reach', clicks: 'Clicks', linkClicks: 'Link clicks', date: 'Day',
       conversionValue: 'Conversion Value',
       conversion: 'Conversions',
@@ -302,14 +393,125 @@ const App = () => {
     return labels[key] || key;
   };
 
-  const [mappings, setMappings] = useState<Record<'facebook' | 'google', MappingConfig>>({
+  const normalizeGoogleType = (value: string): GoogleType => {
+    const upper = value.toUpperCase();
+    if (upper === 'SEARCH' || upper === 'DEMAND_GEN' || upper === 'PERFORMANCE_MAX') {
+      return upper as GoogleType;
+    }
+    return 'PERFORMANCE_MAX';
+  };
+
+  const inferPlatformFromRow = (row: RawDataRow): '' | 'facebook' | 'google' => {
+    const candidate = row.__platform
+      || row['Platform Identification']
+      || row['platform']
+      || row['Platform']
+      || row._raw?.platform
+      || '';
+    const value = String(candidate).toLowerCase();
+    if (value.includes('google')) return 'google';
+    if (value.includes('facebook') || value.includes('meta')) return 'facebook';
+    const hasGoogleType = row.__campaignAdvertisingType
+      || row['campaignAdvertisingType']
+      || row['campaign_advertising_type']
+      || row._raw?.campaignAdvertisingType;
+    if (hasGoogleType) return 'google';
+    return '';
+  };
+
+  const inferGoogleTypeFromRow = (row: RawDataRow): GoogleType => {
+    const candidate = row.__campaignAdvertisingType
+      || row['campaignAdvertisingType']
+      || row['campaign_advertising_type']
+      || row['Campaign Advertising Type']
+      || row._raw?.campaignAdvertisingType
+      || '';
+    return normalizeGoogleType(String(candidate));
+  };
+
+  const computeHeadersBySource = (rows: RawDataRow[]) => {
+    const excluded = new Set(['__platform', '__campaignAdvertisingType', '_raw', 'Platform Identification']);
+    const facebookSet = new Set<string>();
+    const googleSets: Record<GoogleType, Set<string>> = {
+      SEARCH: new Set(),
+      DEMAND_GEN: new Set(),
+      PERFORMANCE_MAX: new Set()
+    };
+
+    rows.forEach(row => {
+      const platform = inferPlatformFromRow(row);
+      const keys = Object.keys(row).filter(key => !excluded.has(key));
+      if (platform === 'facebook') {
+        keys.forEach(k => facebookSet.add(k));
+      } else if (platform === 'google') {
+        const type = inferGoogleTypeFromRow(row);
+        keys.forEach(k => googleSets[type].add(k));
+      }
+    });
+
+    const sortKeys = (set: Set<string>) => Array.from(set).sort();
+    return {
+      facebook: sortKeys(facebookSet),
+      google: {
+        SEARCH: sortKeys(googleSets.SEARCH),
+        DEMAND_GEN: sortKeys(googleSets.DEMAND_GEN),
+        PERFORMANCE_MAX: sortKeys(googleSets.PERFORMANCE_MAX)
+      }
+    };
+  };
+
+  const stripPlatformKey = (mapping: MappingConfig = {}) => {
+    const { platform, ...rest } = mapping as any;
+    return rest as MappingConfig;
+  };
+
+  const migrateMappings = (data: any) => {
+    if (!data || typeof data !== 'object') return mappings;
+    const facebook = stripPlatformKey(data.facebook || {});
+
+    if (data.google && (data.google.SEARCH || data.google.DEMAND_GEN || data.google.PERFORMANCE_MAX)) {
+      return {
+        facebook,
+        google: {
+          SEARCH: stripPlatformKey(data.google.SEARCH || {}),
+          DEMAND_GEN: stripPlatformKey(data.google.DEMAND_GEN || {}),
+          PERFORMANCE_MAX: stripPlatformKey(data.google.PERFORMANCE_MAX || {})
+        }
+      };
+    }
+
+    const legacyGoogle = stripPlatformKey(data.google || {});
+    return {
+      facebook,
+      google: {
+        SEARCH: { ...legacyGoogle },
+        DEMAND_GEN: { ...legacyGoogle },
+        PERFORMANCE_MAX: { ...legacyGoogle }
+      }
+    };
+  };
+
+  const [mappings, setMappings] = useState<{
+    facebook: MappingConfig;
+    google: Record<GoogleType, MappingConfig>;
+  }>({
     facebook: {
-      platform: '', campaign: '', adSet: '', ad: '', cost: '', leads: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
+      campaign: '', adSet: '', ad: '', cost: '', leads: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
       conversionValue: '', conversion: '', addToCart: '', landingPageViews: '', checkout: '', subscribe: ''
     },
     google: {
-      platform: '', campaign: '', adSet: '', ad: '', cost: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
-      conversionValue: '', conversion: '', addToCart: '', landingPageViews: ''
+      SEARCH: {
+        campaign: '', adSet: '', ad: '', cost: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
+        conversionValue: '', conversion: '', addToCart: '', landingPageViews: ''
+      },
+      DEMAND_GEN: {
+        campaign: '', adSet: '', ad: '', cost: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
+        conversionValue: '', conversion: '', addToCart: '', landingPageViews: ''
+      },
+      PERFORMANCE_MAX: {
+        campaign: '', adSet: '', ad: '', cost: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
+        conversionValue: '', conversion: '', addToCart: '', landingPageViews: ''
+      }
     }
   });
 
@@ -320,7 +522,11 @@ const App = () => {
     // 为所有平台增加这个对齐槽位
     setMappings(prev => ({
       facebook: { ...prev.facebook, [key]: '' },
-      google: { ...prev.google, [key]: '' }
+      google: {
+        SEARCH: { ...prev.google.SEARCH, [key]: '' },
+        DEMAND_GEN: { ...prev.google.DEMAND_GEN, [key]: '' },
+        PERFORMANCE_MAX: { ...prev.google.PERFORMANCE_MAX, [key]: '' }
+      }
     }));
     setNewMetricName('');
     setIsAddingMetric(false);
@@ -334,7 +540,11 @@ const App = () => {
     });
     setMappings(prev => ({
       facebook: { ...prev.facebook, [key]: undefined },
-      google: { ...prev.google, [key]: undefined }
+      google: {
+        SEARCH: { ...prev.google.SEARCH, [key]: undefined },
+        DEMAND_GEN: { ...prev.google.DEMAND_GEN, [key]: undefined },
+        PERFORMANCE_MAX: { ...prev.google.PERFORMANCE_MAX, [key]: undefined }
+      }
     }));
   };
 
@@ -358,11 +568,47 @@ const App = () => {
   const [dimFilters, setDimFilters] = useState<Record<string, string[]>>({});
   const [isDimFilterOpen, setIsDimFilterOpen] = useState(false);
   const [dimValueSearch, setDimValueSearch] = useState('');
+  // 报告面板 Tab：bi | pivot | ai
+  const [activeReportTab, setActiveReportTab] = useState<'bi' | 'pivot' | 'ai'>('bi');
+  // 数据透视配置
+  const [pivotFilters, setPivotFilters] = useState<Array<{
+    id: string;
+    fieldKey: string;
+    label: string;
+    mode: 'multi' | 'contains' | 'not_contains' | 'date_range';
+    selectedValues: string[];
+    search: string;
+    textValue: string;
+    dateRange: { start: string; end: string };
+  }>>([]);
+  const [pivotRows, setPivotRows] = useState<string[]>([]);
+  const [pivotColumns, setPivotColumns] = useState<string[]>([]);
+  const [pivotValues, setPivotValues] = useState<string[]>([]);
+  const [pivotPlatformScopes, setPivotPlatformScopes] = useState<PivotPlatformScope[]>(DEFAULT_PIVOT_PLATFORM_SCOPES);
+  const [pivotDisplay, setPivotDisplay] = useState({
+    showSubtotal: false,
+    showGrandTotal: true,
+    totalAxis: 'row' as 'row' | 'column',
+  });
+  const [pivotSort, setPivotSort] = useState<{ colKey: string; valueKey: string; dir: 'asc' | 'desc' } | null>(null);
+  const [isPivotDrawerOpen, setIsPivotDrawerOpen] = useState(false);
+  const [isPivotExportOpen, setIsPivotExportOpen] = useState(false);
+  // BI 指标卡配置
+  const [isBiConfigOpen, setIsBiConfigOpen] = useState(false);
+  const [biCardOrder, setBiCardOrder] = useState<BiCardKey[]>(DEFAULT_BI_CARD_ORDER);
+  const [biCardDraft, setBiCardDraft] = useState<BiCardKey[]>(DEFAULT_BI_CARD_ORDER);
+  // 透视报告预设：保存/加载命名配置
+  const [pivotPresets, setPivotPresets] = useState<PivotPreset[]>([]);
+  const [pivotPresetNameInput, setPivotPresetNameInput] = useState('');
+  const [isSavePivotModalOpen, setIsSavePivotModalOpen] = useState(false);
+  const [isPivotPresetDropdownOpen, setIsPivotPresetDropdownOpen] = useState(false);
 
   const dashboardRef = useRef<HTMLDivElement>(null);
   const metricDropdownRef = useRef<HTMLDivElement>(null);
   const fieldConfigRef = useRef<HTMLDivElement>(null);
   const dimFilterRef = useRef<HTMLDivElement>(null);
+  const pivotExportRef = useRef<HTMLDivElement>(null);
+  const pivotPresetDropdownRef = useRef<HTMLDivElement>(null);
 
   const allAvailableMetrics = useMemo(() => {
     const baseKeys = [...BASE_METRICS, ...Object.keys(customMetricLabels)];
@@ -370,6 +616,11 @@ const App = () => {
     const calc = formulas.map(f => ({ key: f.name, label: f.name }));
     return [...base, ...calc];
   }, [formulas, customMetricLabels]);
+
+  const biCardOptions = useMemo(() => {
+    const metricOptions = allAvailableMetrics.map(m => ({ id: `metric:${m.key}`, label: m.label }));
+    return [...BUILTIN_BI_CARD_OPTIONS, ...metricOptions];
+  }, [allAvailableMetrics]);
 
   // Set initial dashboard dim when configs are ready
   useEffect(() => {
@@ -423,6 +674,12 @@ const App = () => {
       if (dimFilterRef.current && !dimFilterRef.current.contains(event.target as Node)) {
         setIsDimFilterOpen(false);
       }
+      if (pivotExportRef.current && !pivotExportRef.current.contains(event.target as Node)) {
+        setIsPivotExportOpen(false);
+      }
+      if (pivotPresetDropdownRef.current && !pivotPresetDropdownRef.current.contains(event.target as Node)) {
+        setIsPivotPresetDropdownOpen(false);
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -438,21 +695,28 @@ const App = () => {
           // 1. Load Metric Mappings
           const savedMappings = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'metrics');
           if (savedMappings) {
-            setMappings(savedMappings);
+            setMappings(migrateMappings(savedMappings));
             console.log('Loaded metric mappings from cloud');
           }
 
           // 2. Load Dimension Configs
           const savedDimConfigs = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'dimensions');
-          if (savedDimConfigs) {
-            setDimConfigs(savedDimConfigs);
+          const normalizedDimConfigs = normalizeDimConfigs(savedDimConfigs);
+          if (normalizedDimConfigs.length > 0) {
+            setDimConfigs(normalizedDimConfigs);
+            setAllDimensions(prev => {
+              const fromConfig = normalizedDimConfigs.map(d => d.label).filter(Boolean);
+              const merged = [...fromConfig, ...INITIAL_DIMENSIONS.filter(d => !fromConfig.includes(d))];
+              return Array.from(new Set(merged));
+            });
             console.log('Loaded dimension configs from cloud');
           }
 
-          // 3. Load Formula Configs
+          // 3. Load Formula Configs（若云端没有 ROI 则自动补上默认 ROI）
           const savedFormulas = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'formulas');
-          if (savedFormulas) {
-            setFormulas(savedFormulas);
+          if (savedFormulas && Array.isArray(savedFormulas)) {
+            const hasRoi = savedFormulas.some((f: FormulaField) => f.name === 'ROI');
+            setFormulas(hasRoi ? savedFormulas : [...savedFormulas, DEFAULT_ROI_FORMULA]);
             console.log('Loaded formula configs from cloud');
           }
         } catch (e) {
@@ -464,6 +728,159 @@ const App = () => {
       loadUserConfigs();
     }
   }, [selectedProject?.projectId, isLoggedIn, currentUser]);
+
+  // --- 透视报告预设：localStorage / 云端 读写 ---
+  const getPivotAccountKey = () => {
+    if (!selectedAccounts.length) return 'all';
+    return [...selectedAccounts].sort().join('|');
+  };
+
+  const normalizePivotPresetsPayload = (data: any) => {
+    if (!data) return { byAccountKey: {} as Record<string, PivotPreset[]> };
+    if (Array.isArray(data)) return { byAccountKey: { all: data as PivotPreset[] } };
+    if (data.byAccountKey && typeof data.byAccountKey === 'object') {
+      return { byAccountKey: data.byAccountKey as Record<string, PivotPreset[]> };
+    }
+    if (data.accountKey && Array.isArray(data.presets)) {
+      return { byAccountKey: { [data.accountKey]: data.presets as PivotPreset[] } };
+    }
+    return { byAccountKey: {} as Record<string, PivotPreset[]> };
+  };
+
+  const getPivotPresetsStorageKey = () => {
+    if (!currentUser?.username || !selectedProject?.projectId) return null;
+    const accountKey = getPivotAccountKey();
+    return `${PIVOT_PRESETS_STORAGE_PREFIX}${currentUser.username}_${selectedProject.projectId}_${accountKey}`;
+  };
+
+  const savePivotPresetsToCloud = async (list: PivotPreset[]) => {
+    if (!currentUser?.username || !selectedProject?.projectId) return;
+    try {
+      const accountKey = getPivotAccountKey();
+      const existing = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'pivotPresets');
+      const store = normalizePivotPresetsPayload(existing);
+      store.byAccountKey[accountKey] = list;
+      const ok = await saveUserConfig(currentUser.username, selectedProject.projectId, 'pivotPresets', store);
+      if (!ok) console.warn('Failed to save pivot presets to cloud');
+    } catch (e) {
+      console.error('Failed to save pivot presets to cloud', e);
+    }
+  };
+
+  useEffect(() => {
+    const key = getPivotPresetsStorageKey();
+    if (!key) {
+      setPivotPresets([]);
+      return;
+    }
+
+    // 1) 先读本地
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const list = JSON.parse(raw) as PivotPreset[];
+        setPivotPresets(Array.isArray(list) ? list : []);
+      } else {
+        setPivotPresets([]);
+      }
+    } catch {
+      setPivotPresets([]);
+    }
+
+    // 2) 再读云端（覆盖本地）
+    let cancelled = false;
+    const loadFromCloud = async () => {
+      if (!currentUser?.username || !selectedProject?.projectId) return;
+      const cloud = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'pivotPresets');
+      const store = normalizePivotPresetsPayload(cloud);
+      const accountKey = getPivotAccountKey();
+      // 优先用当前 accountKey 的预设；若无则合并所有 accountKey 的预设，确保已保存报告能展示
+      let list = store.byAccountKey[accountKey] || [];
+      if (list.length === 0 && store.byAccountKey && Object.keys(store.byAccountKey).length > 0) {
+        const seen = new Set<string>();
+        list = ([] as PivotPreset[]).concat(...Object.values(store.byAccountKey)).filter(p => {
+          if (p.id && seen.has(p.id)) return false;
+          if (p.id) seen.add(p.id);
+          return true;
+        });
+      }
+      if (cancelled) return;
+      setPivotPresets(list);
+      try {
+        localStorage.setItem(key, JSON.stringify(list));
+      } catch (e) {
+        console.error('Failed to persist pivot presets', e);
+      }
+    };
+    loadFromCloud();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.username, selectedProject?.projectId, selectedAccounts.join('|')]);
+
+  // --- BI 指标卡配置：云端读写（按账号维度存储） ---
+  const getBiAccountKey = () => {
+    if (!selectedAccounts.length) return 'all';
+    return [...selectedAccounts].sort().join('|');
+  };
+
+  const normalizeBiConfigPayload = (data: any) => {
+    if (!data) return { byAccountKey: {} as Record<string, BiCardKey[]> };
+    if (Array.isArray(data)) return { byAccountKey: { all: data as BiCardKey[] } };
+    if (data.byAccountKey && typeof data.byAccountKey === 'object') {
+      return { byAccountKey: data.byAccountKey as Record<string, BiCardKey[]> };
+    }
+    if (data.accountKey && Array.isArray(data.cards)) {
+      return { byAccountKey: { [data.accountKey]: data.cards as BiCardKey[] } };
+    }
+    return { byAccountKey: {} as Record<string, BiCardKey[]> };
+  };
+
+  const saveBiConfigToCloud = async (cards: BiCardKey[]) => {
+    if (!currentUser?.username || !selectedProject?.projectId) return;
+    try {
+      const accountKey = getBiAccountKey();
+      const existing = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'bi');
+      const store = normalizeBiConfigPayload(existing);
+      store.byAccountKey[accountKey] = cards;
+      const ok = await saveUserConfig(currentUser.username, selectedProject.projectId, 'bi', store);
+      if (!ok) console.warn('Failed to save BI config to cloud');
+    } catch (e) {
+      console.error('Failed to save BI config to cloud', e);
+    }
+  };
+
+  useEffect(() => {
+    if (!currentUser?.username || !selectedProject?.projectId) return;
+    let cancelled = false;
+    const loadBiConfig = async () => {
+      const cloud = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'bi');
+      const store = normalizeBiConfigPayload(cloud);
+      const accountKey = getBiAccountKey();
+      let list = store.byAccountKey[accountKey] || store.byAccountKey.all || DEFAULT_BI_CARD_ORDER;
+      const allowed = new Set(biCardOptions.map(o => o.id));
+      list = (list || []).filter(id => allowed.has(id as BiCardKey)) as BiCardKey[];
+      if (!list.length) list = DEFAULT_BI_CARD_ORDER;
+      if (cancelled) return;
+      setBiCardOrder(list);
+    };
+    loadBiConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.username, selectedProject?.projectId, selectedAccounts.join('|'), biCardOptions]);
+
+  const persistPivotPresets = (list: PivotPreset[]) => {
+    const key = getPivotPresetsStorageKey();
+    if (!key) return;
+    try {
+      localStorage.setItem(key, JSON.stringify(list));
+    } catch (e) {
+      console.error('Failed to persist pivot presets', e);
+    }
+    void savePivotPresetsToCloud(list);
+  };
 
   // --- Save Configuration Handler ---
   const handleSaveConfig = async () => {
@@ -491,29 +908,47 @@ const App = () => {
   };
   // Extract samples for the current platform
   const namingSamples = useMemo(() => {
-    if (!rawData.length) return { campaign: '', adSet: '', ad: '' };
-    const curMap = mappings[activePlatformTab];
+    if (!rawData.length) return { campaign: '', adSet: '', ad: '', age: '', gender: '' };
+    const curMap = activePlatformTab === 'facebook'
+      ? mappings.facebook
+      : mappings.google[activeGoogleType];
+    const sampleRow = rawData.find(row => {
+      const platform = inferPlatformFromRow(row);
+      if (activePlatformTab === 'facebook') return platform === 'facebook';
+      if (platform !== 'google') return false;
+      return inferGoogleTypeFromRow(row) === activeGoogleType;
+    }) || rawData[0];
     return {
-      campaign: String(rawData[0][curMap.campaign] || ''),
-      adSet: String(rawData[0][curMap.adSet] || ''),
-      ad: String(rawData[0][curMap.ad] || '')
+      campaign: String(sampleRow[curMap.campaign] || ''),
+      adSet: String(sampleRow[curMap.adSet] || ''),
+      ad: String(sampleRow[curMap.ad] || ''),
+      age: String(sampleRow[curMap.age] || ''),
+      gender: String(sampleRow[curMap.gender] || '')
     };
-  }, [rawData, mappings, activePlatformTab]);
+  }, [rawData, mappings, activePlatformTab, activeGoogleType]);
+
+  const activeMapping = activePlatformTab === 'facebook'
+    ? mappings.facebook
+    : mappings.google[activeGoogleType];
+
+  const activeHeaders = activePlatformTab === 'facebook'
+    ? headersBySource.facebook
+    : headersBySource.google[activeGoogleType];
 
   // Core Data Processing with Global Filter Support
   const baseProcessedData = useMemo(() => {
     if (!rawData.length) return [];
-    const platformHeader = mappings.facebook.platform || mappings.google.platform || '';
     const dates = new Set<string>();
 
     const processed = rawData.map(row => {
-      const rowPlatformVal = platformHeader ? String(row[platformHeader] || '').toUpperCase() : '';
-      const isGoogleRow = rowPlatformVal.includes('GOOGLE');
-      const curMap = isGoogleRow ? mappings.google : mappings.facebook;
+      const platformValue = inferPlatformFromRow(row);
+      const isGoogleRow = platformValue === 'google';
+      const googleType = isGoogleRow ? inferGoogleTypeFromRow(row) : 'PERFORMANCE_MAX';
+      const curMap = isGoogleRow ? mappings.google[googleType] : mappings.facebook;
 
       const context: Record<string, number> = {};
       Object.keys(curMap).forEach(key => {
-        if (['campaign', 'adSet', 'ad', 'date', 'platform'].includes(key)) return;
+        if (['campaign', 'adSet', 'ad', 'date'].includes(key)) return;
         const colName = (curMap as any)[key];
         context[key] = colName ? parseMetricValue(row[colName]) : 0;
       });
@@ -528,11 +963,21 @@ const App = () => {
 
       const dims: Record<string, string> = {};
       dimConfigs.forEach(conf => {
-        const sourceCol = curMap[conf.source as keyof MappingConfig];
-        const sourceVal = String(row[sourceCol] || '');
         if (conf.source === 'platform') {
+          if (platformValue === 'google') {
+            dims[conf.label] = `Google - ${googleType}`;
+          } else if (platformValue === 'facebook') {
+            dims[conf.label] = 'Facebook';
+          } else {
+            dims[conf.label] = 'N/A';
+          }
+        } else if (conf.source === 'age' || conf.source === 'gender') {
+          const sourceCol = curMap[conf.source] || (conf.source === 'age' ? 'Age' : 'Gender');
+          const sourceVal = String(row[sourceCol] ?? row[conf.source === 'age' ? 'Age' : 'Gender'] ?? '');
           dims[conf.label] = sourceVal || 'N/A';
         } else {
+          const sourceCol = curMap[conf.source as keyof MappingConfig];
+          const sourceVal = String(row[sourceCol] || '');
           const parts = sourceVal.split(conf.delimiter || '_');
           dims[conf.label] = parts[conf.index] || 'N/A';
         }
@@ -541,6 +986,8 @@ const App = () => {
       return {
         _date: dateVal,
         _isGoogle: isGoogleRow,
+        _platform: platformValue,
+        _googleType: googleType,
         _dims: dims,
         _metrics: { ...context, ...formulaResults },
       };
@@ -582,6 +1029,32 @@ const App = () => {
 
     return data;
   }, [baseProcessedData, dateRange, dashboardPlatformFilter, dimFilters]);
+
+  // 上期数据：与 dateRange 等长、紧挨着的前一段，用于 BI 看板环比
+  const lastPeriodFilteredData = useMemo(() => {
+    if (!dateRange.start || !dateRange.end) return [];
+    const startD = new Date(dateRange.start);
+    const endD = new Date(dateRange.end);
+    const days = Math.round((endD.getTime() - startD.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+    const lastEndD = new Date(startD);
+    lastEndD.setDate(lastEndD.getDate() - 1);
+    const lastStartD = new Date(lastEndD);
+    lastStartD.setDate(lastStartD.getDate() - days + 1);
+    const lastPeriodStart = lastStartD.toISOString().split('T')[0];
+    const lastPeriodEnd = lastEndD.toISOString().split('T')[0];
+
+    let data = baseProcessedData.filter(row => row._date >= lastPeriodStart && row._date <= lastPeriodEnd);
+    if (dashboardPlatformFilter !== 'all') {
+      const isGoogleTarget = dashboardPlatformFilter === 'google';
+      data = data.filter(row => row._isGoogle === isGoogleTarget);
+    }
+    (Object.entries(dimFilters) as [string, string[]][]).forEach(([dimLabel, activeValues]) => {
+      if (activeValues.length > 0) {
+        data = data.filter(row => activeValues.includes(row._dims[dimLabel] || 'Other'));
+      }
+    });
+    return data;
+  }, [baseProcessedData, dateRange.start, dateRange.end, dashboardPlatformFilter, dimFilters]);
 
   const aggregatedTrendData = useMemo(() => {
     const daily: Record<string, any> = {};
@@ -647,45 +1120,362 @@ const App = () => {
     return Array.from(values).sort();
   }, [baseProcessedData, activeDashboardDim]);
 
-  const autoMap = (hdrs: string[]) => {
-    const findMatch = (targets: string[]) =>
-      hdrs.find(k => targets.some(t => k.toLowerCase().includes(t.toLowerCase()))) || '';
+  // --- 数据透视分析：字段与计算 ---
+  const pivotDimensionFields = useMemo(() => {
+    const dims = dimConfigs.map(d => ({
+      key: d.label,
+      label: d.label,
+      type: (/日期|date|day/i.test(d.label) ? 'date' : 'text') as 'date' | 'text',
+    }));
+    const hasDate = dims.some(d => d.key === '__date' || d.type === 'date');
+    const dateField = { key: '__date', label: '日期', type: 'date' as const };
+    return hasDate ? dims : [dateField, ...dims];
+  }, [dimConfigs]);
 
-    const baseMapping = {
-      platform: findMatch(['platform', 'source']),
-      campaign: findMatch(['campaign name', 'campaign']),
-      adSet: findMatch(['ad set name', 'adset']),
-      ad: findMatch(['ad name', 'creative']),
-      cost: findMatch(['amount spent', 'spend', 'cost']),
-      impressions: findMatch(['impressions']),
-      reach: findMatch(['reach']),
-      clicks: findMatch(['all clicks', 'clicks (all)']),
-      linkClicks: findMatch(['link clicks', 'clicks']),
-      date: findMatch(['day', 'date']),
-      conversionValue: findMatch(['conversion value', 'purchase value', 'conversionvalue']),
-      conversion: findMatch(['conversion', 'conversions', 'purchases', 'purchase']),
-      addToCart: findMatch(['add to cart', 'atc', 'addtocart']),
-      landingPageViews: findMatch(['landing page views', 'landingpageviews']),
+  const formulaByName = useMemo(() => {
+    const map = new Map<string, FormulaField>();
+    formulas.forEach(f => map.set(f.name, f));
+    return map;
+  }, [formulas]);
+
+  const pivotValueOptions = useMemo(() => {
+    return allAvailableMetrics.map(m => {
+      const formula = formulaByName.get(m.key);
+      const unit = formula?.unit;
+      const format = unit === '$' ? 'currency' : unit === '%' ? 'percent' : 'number';
+      return { key: m.key, label: m.label, isFormula: !!formula, format };
+    });
+  }, [allAvailableMetrics, formulaByName]);
+
+  const getPivotDimValue = (row: any, fieldKey: string) => {
+    if (fieldKey === '__date') return row._date || 'N/A';
+    return row._dims[fieldKey] || 'Other';
+  };
+
+  const pivotPlatformScopedData = useMemo(() => {
+    if (pivotPlatformScopes.length === 0) return [];
+    const scopeSet = new Set(pivotPlatformScopes);
+    return filteredData.filter(row => {
+      if (row._platform === 'facebook') return scopeSet.has('meta');
+      if (row._platform === 'google') {
+        const gType: GoogleType = row._googleType || 'PERFORMANCE_MAX';
+        if (gType === 'SEARCH') return scopeSet.has('google_search');
+        if (gType === 'DEMAND_GEN') return scopeSet.has('google_demand_gen');
+        return scopeSet.has('google_performance_max');
+      }
+      return pivotPlatformScopes.length === DEFAULT_PIVOT_PLATFORM_SCOPES.length;
+    });
+  }, [filteredData, pivotPlatformScopes]);
+
+  const pivotDimensionValueOptions = useMemo(() => {
+    const sets: Record<string, Set<string>> = {};
+    pivotDimensionFields.forEach(f => { sets[f.key] = new Set(); });
+    pivotPlatformScopedData.forEach(row => {
+      pivotDimensionFields.forEach(f => {
+        sets[f.key].add(String(getPivotDimValue(row, f.key)));
+      });
+    });
+    const result: Record<string, string[]> = {};
+    Object.keys(sets).forEach(k => {
+      result[k] = Array.from(sets[k]).sort();
+    });
+    return result;
+  }, [pivotPlatformScopedData, pivotDimensionFields]);
+
+  const pivotFilteredData = useMemo(() => {
+    if (!pivotFilters.length) return pivotPlatformScopedData;
+    return pivotPlatformScopedData.filter(row => {
+      return pivotFilters.every(f => {
+        const rawVal = String(getPivotDimValue(row, f.fieldKey) || '');
+        if (f.mode === 'date_range') {
+          if (f.dateRange.start && rawVal < f.dateRange.start) return false;
+          if (f.dateRange.end && rawVal > f.dateRange.end) return false;
+          return true;
+        }
+        if (f.mode === 'multi') {
+          if (f.selectedValues.length === 0) return true;
+          return f.selectedValues.includes(rawVal);
+        }
+        if (!f.textValue) return true;
+        const needle = f.textValue.toLowerCase();
+        const hay = rawVal.toLowerCase();
+        if (f.mode === 'contains') return hay.includes(needle);
+        if (f.mode === 'not_contains') return !hay.includes(needle);
+        return true;
+      });
+    });
+  }, [pivotPlatformScopedData, pivotFilters]);
+
+  const pivotResult = useMemo(() => {
+    if (pivotValues.length === 0) return null;
+
+    const rowDims = pivotRows;
+    const colDims = pivotColumns;
+    const valueKeys = pivotValues;
+    const baseKeys = [...BASE_METRICS, ...Object.keys(customMetricLabels)];
+    const baseKeySet = new Set(baseKeys);
+    const makeKey = (arr: string[]) => arr.join('||');
+
+    const rowKeyMap = new Map<string, string[]>();
+    const colKeyMap = new Map<string, string[]>();
+    const rowOrder: string[] = [];
+    const colOrder: string[] = [];
+    const cellBaseAgg = new Map<string, Record<string, number>>();
+
+    const ensureKey = (key: string, map: Map<string, string[]>, order: string[], arr: string[]) => {
+      if (!map.has(key)) {
+        map.set(key, arr);
+        order.push(key);
+      }
     };
 
-    const facebookMapping = {
-      ...baseMapping,
-      leads: findMatch(['leads', 'results']),
-      checkout: findMatch(['checkout', 'checkouts']),
-      subscribe: findMatch(['subscribe', 'subscription', 'subscriptions']),
-    } as MappingConfig;
-
-    const googleMapping = {
-      ...baseMapping
-    } as MappingConfig;
-
-    // Preserve existing custom metrics
-    Object.keys(customMetricLabels).forEach(key => {
-      facebookMapping[key] = mappings.facebook[key] || '';
-      googleMapping[key] = mappings.google[key] || '';
+    pivotFilteredData.forEach(row => {
+      const rowArr = rowDims.length ? rowDims.map(d => String(getPivotDimValue(row, d))) : [];
+      const colArr = colDims.length ? colDims.map(d => String(getPivotDimValue(row, d))) : [];
+      const rowKey = rowDims.length ? makeKey(rowArr) : '__all__';
+      const colKey = colDims.length ? makeKey(colArr) : '__all__';
+      ensureKey(rowKey, rowKeyMap, rowOrder, rowArr);
+      ensureKey(colKey, colKeyMap, colOrder, colArr);
+      const cellKey = `${rowKey}|||${colKey}`;
+      if (!cellBaseAgg.has(cellKey)) {
+        const init: Record<string, number> = { __count: 0 };
+        baseKeys.forEach(k => { init[k] = 0; });
+        cellBaseAgg.set(cellKey, init);
+      }
+      const agg = cellBaseAgg.get(cellKey)!;
+      agg.__count = (agg.__count || 0) + 1;
+      baseKeys.forEach(k => {
+        agg[k] = (agg[k] || 0) + (row._metrics[k] || 0);
+      });
     });
 
-    setMappings({ facebook: facebookMapping, google: googleMapping });
+    if (rowOrder.length === 0) rowOrder.push('__all__');
+    if (colOrder.length === 0) colOrder.push('__all__');
+
+    const colKeys = [...colOrder];
+    if (pivotDisplay.showGrandTotal && pivotDisplay.totalAxis === 'column') {
+      colKeys.push('__grand_total__');
+    }
+
+    const colLabels: Record<string, string> = {};
+    colKeys.forEach(key => {
+      if (key === '__all__') colLabels[key] = '全部';
+      else if (key === '__grand_total__') colLabels[key] = '总计';
+      else colLabels[key] = (colKeyMap.get(key) || []).join(' / ') || '全部';
+    });
+
+    const rowKeyArrs = rowOrder.map(k => rowKeyMap.get(k) || []);
+    const rowEntries: Array<{
+      type: 'data' | 'subtotal' | 'grand_total';
+      key: string;
+      rowArr: string[];
+      depth: number;
+      displayCells: string[];
+    }> = [];
+
+    if (rowDims.length === 0) {
+      rowEntries.push({ type: 'data', key: '__all__', rowArr: [], depth: 0, displayCells: ['全部'] });
+    } else {
+      const build = (level: number, items: Array<{ key: string; rowArr: string[] }>) => {
+        const groups = new Map<string, Array<{ key: string; rowArr: string[] }>>();
+        items.forEach(item => {
+          const val = item.rowArr[level] || 'Other';
+          if (!groups.has(val)) groups.set(val, []);
+          groups.get(val)!.push(item);
+        });
+        for (const [val, groupItems] of groups) {
+          if (level === rowDims.length - 1) {
+            groupItems.forEach(item => {
+              rowEntries.push({ type: 'data', key: item.key, rowArr: item.rowArr, depth: level, displayCells: item.rowArr });
+            });
+          } else {
+            build(level + 1, groupItems);
+          }
+          if (pivotDisplay.showSubtotal) {
+            const displayCells = [...(groupItems[0]?.rowArr || [])];
+            displayCells[level] = `${val} 小计`;
+            for (let i = level + 1; i < rowDims.length; i += 1) displayCells[i] = '';
+            rowEntries.push({
+              type: 'subtotal',
+              key: `subtotal-${groupItems[0]?.rowArr?.slice(0, level + 1).join('||')}`,
+              rowArr: groupItems[0]?.rowArr?.slice(0, level + 1) || [],
+              depth: level,
+              displayCells,
+            });
+          }
+        }
+      };
+      build(0, rowOrder.map((k, i) => ({ key: k, rowArr: rowKeyArrs[i] })));
+    }
+
+    if (pivotDisplay.showGrandTotal && pivotDisplay.totalAxis === 'row') {
+      rowEntries.push({ type: 'grand_total', key: '__grand_total__', rowArr: [], depth: 0, displayCells: ['总计'] });
+    }
+
+    const rowMatchesPrefix = (rowArr: string[], prefix: string[]) => {
+      return prefix.every((v, idx) => rowArr[idx] === v);
+    };
+
+    const getBaseAggForRowCol = (rowKeyStrs: string[], colKeyStr: string) => {
+      const agg: Record<string, number> = { __count: 0 };
+      baseKeys.forEach(k => { agg[k] = 0; });
+      rowKeyStrs.forEach(rk => {
+        if (colKeyStr === '__grand_total__') {
+          colOrder.forEach(ck => {
+            const cellKey = `${rk}|||${ck}`;
+            const cellAgg = cellBaseAgg.get(cellKey);
+            if (cellAgg) {
+              agg.__count += cellAgg.__count || 0;
+              baseKeys.forEach(k => { agg[k] += cellAgg[k] || 0; });
+            }
+          });
+        } else {
+          const cellKey = `${rk}|||${colKeyStr}`;
+          const cellAgg = cellBaseAgg.get(cellKey);
+          if (cellAgg) {
+            agg.__count += cellAgg.__count || 0;
+            baseKeys.forEach(k => { agg[k] += cellAgg[k] || 0; });
+          }
+        }
+      });
+      return agg;
+    };
+
+    const computeValue = (agg: Record<string, number>, key: string) => {
+      if (!agg.__count) return null;
+      if (formulaByName.has(key)) {
+        return evalFormula(formulaByName.get(key)!.formula, agg);
+      }
+      return agg[key] || 0;
+    };
+
+    const rowsForRender = rowEntries.map(entry => {
+      let rowKeyStrs: string[] = [];
+      if (entry.type === 'data') rowKeyStrs = [entry.key];
+      else if (entry.type === 'grand_total') rowKeyStrs = rowOrder;
+      else {
+        rowKeyStrs = rowOrder.filter((rk, idx) => rowMatchesPrefix(rowKeyArrs[idx], entry.rowArr));
+      }
+
+      const cells: Record<string, Record<string, number | null>> = {};
+      colKeys.forEach(colKey => {
+        const agg = getBaseAggForRowCol(rowKeyStrs, colKey);
+        const valueMap: Record<string, number | null> = {};
+        valueKeys.forEach(vk => { valueMap[vk] = computeValue(agg, vk); });
+        cells[colKey] = valueMap;
+      });
+      return { ...entry, cells };
+    });
+
+    return {
+      rowDims,
+      colDims,
+      valueKeys,
+      colKeys,
+      colLabels,
+      rows: rowsForRender,
+      baseKeySet,
+    };
+  }, [pivotValues, pivotRows, pivotColumns, pivotFilteredData, pivotDisplay, formulaByName, customMetricLabels]);
+
+  const pivotValueMeta = useMemo(() => {
+    const map = new Map<string, { format: 'currency' | 'percent' | 'number'; label: string }>();
+    pivotValueOptions.forEach(v => map.set(v.key, { format: v.format, label: v.label }));
+    return map;
+  }, [pivotValueOptions]);
+
+  const pivotDisplayRows = useMemo(() => {
+    if (!pivotResult?.rows.length) return [];
+    if (!pivotSort) return pivotResult.rows;
+    const dataRows = pivotResult.rows.filter((r: { type: string }) => r.type === 'data');
+    const grandTotalRows = pivotResult.rows.filter((r: { type: string }) => r.type === 'grand_total');
+    const { colKey, valueKey, dir } = pivotSort;
+    const sorted = [...dataRows].sort((a: { cells: Record<string, Record<string, number | null>> }, b: { cells: Record<string, Record<string, number | null>> }) => {
+      const va = a.cells[colKey]?.[valueKey] ?? null;
+      const vb = b.cells[colKey]?.[valueKey] ?? null;
+      const numA = typeof va === 'number' ? va : NaN;
+      const numB = typeof vb === 'number' ? vb : NaN;
+      if (!Number.isNaN(numA) && !Number.isNaN(numB)) {
+        return dir === 'asc' ? numA - numB : numB - numA;
+      }
+      const sa = String(va ?? '');
+      const sb = String(vb ?? '');
+      return dir === 'asc' ? sa.localeCompare(sb) : sb.localeCompare(sa);
+    });
+    return [...sorted, ...grandTotalRows];
+  }, [pivotResult, pivotSort]);
+
+  const formatPivotValue = (val: number | null, key: string) => {
+    if (val === null || val === undefined) return '';
+    const meta = pivotValueMeta.get(key);
+    if (meta?.format === 'currency') {
+      return `$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    if (meta?.format === 'percent') {
+      return `${Number(val).toFixed(2)}%`;
+    }
+    return Number(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
+  const autoMap = (hdrsBySource: {
+    facebook: string[];
+    google: Record<GoogleType, string[]>;
+  }) => {
+    const findMatch = (hdrs: string[], targets: string[]) => {
+      for (const t of targets) {
+        const found = hdrs.find(k => k.toLowerCase().includes(t.toLowerCase()));
+        if (found) return found;
+      }
+      return '';
+    };
+
+    // 若云端已有非空映射且该列仍在新表头中，则保留；否则用自动匹配。这样拉数后不会覆盖已保存的 metrics 配置
+    const pick = (hdrs: string[], targets: string[], existing: string | undefined): string => {
+      const existingVal = (existing || '').trim();
+      if (existingVal && hdrs.includes(existingVal)) return existingVal;
+      return findMatch(hdrs, targets);
+    };
+
+    const buildBaseMapping = (hdrs: string[], existing: MappingConfig) => ({
+      campaign: pick(hdrs, ['campaign name', 'campaign'], existing.campaign),
+      adSet: pick(hdrs, ['ad set name', 'adset'], existing.adSet),
+      ad: pick(hdrs, ['ad name', 'creative'], existing.ad),
+      age: pick(hdrs, ['age'], existing.age),
+      gender: pick(hdrs, ['gender'], existing.gender),
+      cost: pick(hdrs, ['amount spent', 'spend', 'cost'], existing.cost),
+      impressions: pick(hdrs, ['impressions'], existing.impressions),
+      reach: pick(hdrs, ['reach'], existing.reach),
+      clicks: pick(hdrs, ['all clicks', 'clicks (all)'], existing.clicks),
+      linkClicks: pick(hdrs, ['link clicks', 'clicks'], existing.linkClicks),
+      date: pick(hdrs, ['day', 'date'], existing.date),
+      conversionValue: pick(hdrs, ['conversion value', 'purchase value', 'conversionvalue'], existing.conversionValue),
+      conversion: pick(hdrs, ['conversion', 'conversions', 'purchases', 'purchase'], existing.conversion),
+      addToCart: pick(hdrs, ['add to cart', 'atc', 'addtocart'], existing.addToCart),
+      landingPageViews: pick(hdrs, ['landing page views', 'landingpageviews'], existing.landingPageViews),
+    });
+
+    const baseFacebook = buildBaseMapping(hdrsBySource.facebook, mappings.facebook);
+    const facebookMapping: MappingConfig = {
+      ...baseFacebook,
+      leads: pick(hdrsBySource.facebook, ['leads', 'results'], mappings.facebook.leads),
+      checkout: pick(hdrsBySource.facebook, ['checkout', 'checkouts'], mappings.facebook.checkout),
+      subscribe: pick(hdrsBySource.facebook, ['subscribe', 'subscription', 'subscriptions'], mappings.facebook.subscribe),
+    };
+
+    const googleMappingByType: Record<GoogleType, MappingConfig> = {
+      SEARCH: buildBaseMapping(hdrsBySource.google.SEARCH, mappings.google.SEARCH),
+      DEMAND_GEN: buildBaseMapping(hdrsBySource.google.DEMAND_GEN, mappings.google.DEMAND_GEN),
+      PERFORMANCE_MAX: buildBaseMapping(hdrsBySource.google.PERFORMANCE_MAX, mappings.google.PERFORMANCE_MAX)
+    };
+
+    Object.keys(customMetricLabels).forEach(key => {
+      facebookMapping[key] = mappings.facebook[key] || '';
+      GOOGLE_TYPES.forEach(type => {
+        googleMappingByType[type][key] = mappings.google[type][key] || '';
+      });
+    });
+
+    setMappings({ facebook: facebookMapping, google: googleMappingByType });
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -695,9 +1485,9 @@ const App = () => {
     const processData = (data: RawDataRow[]) => {
       setRawData(data);
       if (data.length > 0) {
-        const hdrs = Object.keys(data[0] || {});
-        setHeaders(hdrs);
-        autoMap(hdrs);
+        const hdrsBySource = computeHeadersBySource(data);
+        setHeadersBySource(hdrsBySource);
+        autoMap(hdrsBySource);
         setStep('mapping'); // Changed from dataSourceConfig to mapping directly
       }
     };
@@ -767,11 +1557,22 @@ const App = () => {
     setApiError('');
 
     try {
+      // 方案 A：拉数时扩大日期范围（上期+本期），用于 BI 看板环比
+      const startD = new Date(apiDateRange.start);
+      const endD = new Date(apiDateRange.end);
+      const days = Math.round((endD.getTime() - startD.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+      const expandedStartD = new Date(startD);
+      expandedStartD.setDate(expandedStartD.getDate() - days);
+      const expandedStart = expandedStartD.toISOString().split('T')[0];
+
+      const segmentList = ['age_date', 'gender_adset_date'];
+
       const apiData = await fetchAllPlatformsData(
         selectedProject.projectId,
-        apiDateRange.start,
+        expandedStart,
         apiDateRange.end,
-        selectedAccounts.length > 0 ? selectedAccounts : undefined
+        selectedAccounts.length > 0 ? selectedAccounts : undefined,
+        segmentList
       );
 
       if (apiData.length === 0) {
@@ -784,12 +1585,16 @@ const App = () => {
       setRawData(transformed);
 
       if (transformed.length > 0) {
-        const hdrs = Object.keys(transformed[0] || {});
-        setHeaders(hdrs);
-        autoMap(hdrs);
+        const hdrsBySource = computeHeadersBySource(transformed);
+        setHeadersBySource(hdrsBySource);
+        autoMap(hdrsBySource);
 
         const accounts = extractUniqueAccounts(apiData);
         setAvailableAccounts(accounts);
+
+        // 数据范围 = 扩大后的范围；报告默认展示“本期”（用户选的日期）
+        setReportDateRangeBounds({ start: expandedStart, end: apiDateRange.end });
+        setDateRange({ start: apiDateRange.start, end: apiDateRange.end });
 
         // 直接跳转到 mapping 步骤
         setStep('mapping');
@@ -895,6 +1700,141 @@ const App = () => {
     else setDimFilters(prev => ({ ...prev, [activeDashboardDim]: [...currentDimValues] }));
   };
 
+  // --- 数据透视配置操作 ---
+  const addPivotListItem = (list: string[], setter: (v: string[]) => void, key: string) => {
+    if (!key) return;
+    if (list.includes(key)) return;
+    setter([...list, key]);
+  };
+  const removePivotListItem = (list: string[], setter: (v: string[]) => void, key: string) => {
+    setter(list.filter(k => k !== key));
+  };
+  const movePivotListItem = (list: string[], setter: (v: string[]) => void, key: string, dir: 'up' | 'down') => {
+    const idx = list.indexOf(key);
+    if (idx === -1) return;
+    const nextIdx = dir === 'up' ? idx - 1 : idx + 1;
+    if (nextIdx < 0 || nextIdx >= list.length) return;
+    const next = [...list];
+    [next[idx], next[nextIdx]] = [next[nextIdx], next[idx]];
+    setter(next);
+  };
+
+  const togglePivotPlatformScope = (key: PivotPlatformScope) => {
+    setPivotPlatformScopes(prev => (
+      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+    ));
+  };
+
+  const togglePivotPlatformAll = () => {
+    setPivotPlatformScopes(prev => (
+      prev.length === DEFAULT_PIVOT_PLATFORM_SCOPES.length ? [] : [...DEFAULT_PIVOT_PLATFORM_SCOPES]
+    ));
+  };
+
+  const handleAddPivotFilter = (fieldKey: string) => {
+    const field = pivotDimensionFields.find(f => f.key === fieldKey);
+    if (!field) return;
+    setPivotFilters(prev => {
+      if (prev.some(p => p.fieldKey === fieldKey)) return prev;
+      return [
+        ...prev,
+        {
+          id: `${fieldKey}-${Date.now()}`,
+          fieldKey,
+          label: field.label,
+          mode: field.type === 'date' ? 'date_range' : 'multi',
+          selectedValues: [],
+          search: '',
+          textValue: '',
+          dateRange: { start: '', end: '' },
+        },
+      ];
+    });
+  };
+
+  const updatePivotFilter = (id: string, patch: Partial<{
+    mode: 'multi' | 'contains' | 'not_contains' | 'date_range';
+    selectedValues: string[];
+    search: string;
+    textValue: string;
+    dateRange: { start: string; end: string };
+  }>) => {
+    setPivotFilters(prev => prev.map(f => (f.id === id ? { ...f, ...patch } : f)));
+  };
+
+  const removePivotFilter = (id: string) => {
+    setPivotFilters(prev => prev.filter(f => f.id !== id));
+  };
+
+  // --- 透视报告预设：保存 / 应用 / 删除 ---
+  const handleSavePivotPreset = () => {
+    const name = pivotPresetNameInput.trim();
+    if (!name) return;
+    const preset: PivotPreset = {
+      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `preset_${Date.now()}`,
+      name,
+      filters: pivotFilters.map(f => ({
+        fieldKey: f.fieldKey,
+        label: f.label,
+        mode: f.mode,
+        selectedValues: f.selectedValues,
+        textValue: f.textValue,
+        dateRange: f.dateRange,
+      })),
+      rows: [...pivotRows],
+      columns: [...pivotColumns],
+      values: [...pivotValues],
+      display: { ...pivotDisplay },
+      platformScopes: [...pivotPlatformScopes],
+    };
+    setPivotPresets(prev => {
+      const next = [...prev, preset];
+      persistPivotPresets(next);
+      return next;
+    });
+    setPivotPresetNameInput('');
+    setIsSavePivotModalOpen(false);
+  };
+
+  const handleApplyPivotPreset = (preset: PivotPreset) => {
+    const validDimKeys = new Set(pivotDimensionFields.map(f => f.key));
+    const validValueKeys = new Set(allAvailableMetrics.map(m => m.key));
+    const validPlatformScopes = new Set(PIVOT_PLATFORM_OPTIONS.map(p => p.key));
+    const safeFilters = preset.filters.filter(f => validDimKeys.has(f.fieldKey));
+    setPivotFilters(
+      safeFilters.map(f => ({
+        id: `${f.fieldKey}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        fieldKey: f.fieldKey,
+        label: f.label,
+        mode: f.mode,
+        selectedValues: f.selectedValues,
+        search: '',
+        textValue: f.textValue,
+        dateRange: f.dateRange,
+      }))
+    );
+    const safePlatformScopes = (preset.platformScopes || DEFAULT_PIVOT_PLATFORM_SCOPES)
+      .filter(k => validPlatformScopes.has(k));
+    setPivotPlatformScopes(safePlatformScopes.length ? safePlatformScopes : DEFAULT_PIVOT_PLATFORM_SCOPES);
+    const filteredRows = preset.rows.filter(k => validDimKeys.has(k));
+    const filteredCols = preset.columns.filter(k => validDimKeys.has(k));
+    const filteredVals = preset.values.filter(k => validValueKeys.has(k));
+    setPivotRows(filteredRows.length ? filteredRows : preset.rows);
+    setPivotColumns(filteredCols.length ? filteredCols : preset.columns);
+    setPivotValues(filteredVals.length ? filteredVals : preset.values);
+    setPivotDisplay({ ...preset.display });
+    setIsPivotPresetDropdownOpen(false);
+  };
+
+  const handleRemovePivotPreset = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setPivotPresets(prev => {
+      const next = prev.filter(p => p.id !== id);
+      persistPivotPresets(next);
+      return next;
+    });
+  };
+
   const handleAddDimension = () => {
     if (!newDimensionName.trim()) return;
     if (allDimensions.includes(newDimensionName.trim())) return;
@@ -908,31 +1848,240 @@ const App = () => {
     setDimConfigs(prev => prev.filter(c => c.label !== dim));
   };
 
+  const exportPivotData = (type: 'csv' | 'xlsx') => {
+    if (!pivotResult) return;
+    const rowHeaders = pivotResult.rowDims.length ? pivotResult.rowDims : ['维度'];
+    const colKeys = pivotResult.colKeys;
+    const valueKeys = pivotResult.valueKeys;
+    const header = [
+      ...rowHeaders,
+      ...colKeys.flatMap(colKey => {
+        const colLabel = pivotResult.colLabels[colKey];
+        const isAll = colKey === '__all__';
+        if (valueKeys.length === 1) {
+          const valueLabel = pivotValueMeta.get(valueKeys[0])?.label || valueKeys[0];
+          return [isAll ? valueLabel : colLabel];
+        }
+        return valueKeys.map(vk => `${colLabel} · ${pivotValueMeta.get(vk)?.label || vk}`);
+      }),
+    ];
+    const rows = pivotResult.rows.map(r => {
+      const rowCells = rowHeaders.map((_, idx) => r.displayCells[idx] || '');
+      const values = colKeys.flatMap(colKey =>
+        valueKeys.map(vk => (r.cells[colKey]?.[vk] ?? ''))
+      );
+      return [...rowCells, ...values];
+    });
+    const matrix = [header, ...rows];
+    const fileSuffix = new Date().toISOString().slice(0, 10);
+    if (type === 'csv') {
+      const csv = Papa.unparse(matrix);
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `pivot_${fileSuffix}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+    const ws = XLSX.utils.aoa_to_sheet(matrix);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Pivot');
+    XLSX.writeFile(wb, `pivot_${fileSuffix}.xlsx`);
+  };
+
+  const copyPivotToClipboard = async () => {
+    if (!pivotResult) return;
+    const rowHeaders = pivotResult.rowDims.length ? pivotResult.rowDims : ['维度'];
+    const colKeys = pivotResult.colKeys;
+    const valueKeys = pivotResult.valueKeys;
+    const headerRow1 = [
+      ...rowHeaders,
+      ...colKeys.flatMap(colKey => {
+        const colLabel = pivotResult.colLabels[colKey];
+        const isAll = colKey === '__all__';
+        if (valueKeys.length === 1) {
+          const valueLabel = pivotValueMeta.get(valueKeys[0])?.label || valueKeys[0];
+          return [isAll ? valueLabel : colLabel];
+        }
+        return [colLabel];
+      }),
+    ];
+    const headerRow2 = valueKeys.length > 1
+      ? [
+        ...rowHeaders.map(() => ''),
+        ...colKeys.flatMap(() => valueKeys.map(vk => pivotValueMeta.get(vk)?.label || vk)),
+      ]
+      : [];
+    const rows = pivotResult.rows.map(r => {
+      const rowCells = rowHeaders.map((_, idx) => r.displayCells[idx] || '');
+      const values = colKeys.flatMap(colKey =>
+        valueKeys.map(vk => formatPivotValue(r.cells[colKey]?.[vk] ?? null, vk))
+      );
+      return [...rowCells, ...values];
+    });
+    const matrix = headerRow2.length ? [headerRow1, headerRow2, ...rows] : [headerRow1, ...rows];
+    const text = matrix.map(row => row.join('\t')).join('\n');
+    const htmlRows: string[] = [];
+    const makeTh = (content: string, attrs = '') => `<th ${attrs} style="border:1px solid #e5e7eb;padding:6px 8px;font-weight:700;font-size:12px;background:#f8fafc;text-align:center;white-space:nowrap;">${content || ''}</th>`;
+    const makeTd = (content: string, attrs = '') => `<td ${attrs} style="border:1px solid #e5e7eb;padding:6px 8px;font-size:12px;text-align:right;">${content || ''}</td>`;
+    const makeTdLeft = (content: string, attrs = '') => `<td ${attrs} style="border:1px solid #e5e7eb;padding:6px 8px;font-size:12px;text-align:left;font-weight:700;">${content || ''}</td>`;
+    // Header row 1 with colSpan
+    const header1Cells: string[] = [];
+    rowHeaders.forEach(label => {
+      header1Cells.push(makeTh(label, `rowspan="${headerRow2.length ? 2 : 1}"`));
+    });
+    colKeys.forEach(colKey => {
+      const colLabel = pivotResult.colLabels[colKey];
+      if (valueKeys.length === 1) {
+        header1Cells.push(makeTh(colLabel, ''));
+      } else {
+        header1Cells.push(makeTh(colLabel, `colspan="${valueKeys.length}"`));
+      }
+    });
+    htmlRows.push(`<tr>${header1Cells.join('')}</tr>`);
+    if (headerRow2.length) {
+      const header2Cells: string[] = [];
+      valueKeys.forEach(vk => {
+        // placeholder, we will repeat for each colKey below
+      });
+      const valueLabels = valueKeys.map(vk => pivotValueMeta.get(vk)?.label || vk);
+      const row2Cells = colKeys.flatMap(() => valueLabels.map(vl => makeTh(vl)));
+      htmlRows.push(`<tr>${row2Cells.join('')}</tr>`);
+    }
+    rows.forEach(r => {
+      const rowCells: string[] = [];
+      rowHeaders.forEach((_, idx) => rowCells.push(makeTdLeft(r[idx] || '')));
+      const valueCells = r.slice(rowHeaders.length).map(v => makeTd(String(v || '')));
+      htmlRows.push(`<tr>${[...rowCells, ...valueCells].join('')}</tr>`);
+    });
+    const html = `<table style="border-collapse:collapse;">${htmlRows.join('')}</table>`;
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([text], { type: 'text/plain' }),
+        })
+      ]);
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
+  };
+
   const activeFiltersCount = useMemo(() => {
     return (Object.values(dimFilters) as string[][]).reduce((acc: number, curr: string[]) => acc + (curr.length > 0 ? 1 : 0), 0);
   }, [dimFilters]);
+
+  // BI 看板 KPI 卡片：本期 vs 上期真实环比（方案 A）
+  const biKpiCards = useMemo(() => {
+    const cur = filteredData;
+    const last = lastPeriodFilteredData;
+    const baseKeys = [...BASE_METRICS, ...Object.keys(customMetricLabels)];
+    const sumContext = (data: typeof cur) => {
+      const ctx: Record<string, number> = {};
+      baseKeys.forEach(k => { ctx[k] = 0; });
+      data.forEach(r => {
+        baseKeys.forEach(k => { ctx[k] += r._metrics[k] || 0; });
+      });
+      return ctx;
+    };
+    const curCtx = sumContext(cur);
+    const lastCtx = sumContext(last);
+    const pct = (curr: number, prev: number) =>
+      prev !== 0 ? ((curr - prev) / prev) * 100 : (curr !== 0 ? 100 : 0);
+    const subStr = (change: number) => `${change >= 0 ? '+' : ''}${change.toFixed(1)}% vs last period`;
+    const downIsGood = (key: string) => /cost|cpc|cpm|cpa|cpatc|cps|cpl/i.test(key);
+    const metricLabelMap = new Map(allAvailableMetrics.map(m => [m.key, m.label]));
+    const getMetricValue = (key: string, ctx: Record<string, number>) => {
+      if (formulaByName.has(key)) {
+        return evalFormula(formulaByName.get(key)!.formula, ctx);
+      }
+      return ctx[key] || 0;
+    };
+
+    const cards: Array<{ id: BiCardKey; label: string; value: string; sub: string; isImprovement: boolean; trend: 'up' | 'down' }> = [];
+
+    // 内置 KPI
+    const curCost = curCtx.cost || 0;
+    const lastCost = lastCtx.cost || 0;
+    const curLeads = curCtx.leads || 0;
+    const lastLeads = lastCtx.leads || 0;
+    const curClicks = curCtx.linkClicks || 0;
+    const lastClicks = lastCtx.linkClicks || 0;
+    const curImpr = curCtx.impressions || 0;
+    const lastImpr = lastCtx.impressions || 0;
+    const curCpl = curCost / (curLeads || 1);
+    const lastCpl = lastCost / (lastLeads || 1);
+    const curCtr = (curClicks / (curImpr || 1)) * 100;
+    const lastCtr = (lastClicks / (lastImpr || 1)) * 100;
+    const curSubRate = (curLeads / (curClicks || 1)) * 100;
+    const lastSubRate = (lastLeads / (lastClicks || 1)) * 100;
+
+    cards.push(
+      { id: 'kpi:total_cost', label: 'Total Cost', value: formatPivotValue(curCost, 'cost'), sub: subStr(pct(curCost, lastCost)), isImprovement: curCost <= lastCost, trend: curCost >= lastCost ? 'up' : 'down' },
+      { id: 'kpi:total_leads', label: 'Total Leads', value: formatPivotValue(curLeads, 'leads'), sub: subStr(pct(curLeads, lastLeads)), isImprovement: curLeads >= lastLeads, trend: curLeads >= lastLeads ? 'up' : 'down' },
+      { id: 'kpi:avg_cpl', label: 'Avg CPL', value: `$${curCpl.toFixed(2)}`, sub: subStr(pct(curCpl, lastCpl)), isImprovement: curCpl <= lastCpl, trend: curCpl >= lastCpl ? 'up' : 'down' },
+      { id: 'kpi:avg_ctr', label: 'Avg CTR', value: `${curCtr.toFixed(2)}%`, sub: subStr(pct(curCtr, lastCtr)), isImprovement: curCtr >= lastCtr, trend: curCtr >= lastCtr ? 'up' : 'down' },
+      { id: 'kpi:sub_rate', label: 'Sub Rate', value: `${curSubRate.toFixed(2)}%`, sub: subStr(pct(curSubRate, lastSubRate)), isImprovement: curSubRate >= lastSubRate, trend: curSubRate >= lastSubRate ? 'up' : 'down' }
+    );
+
+    // 指标对齐 + 公式计算
+    biCardOptions.forEach(opt => {
+      if (!opt.id.startsWith('metric:')) return;
+      const metricKey = opt.id.replace('metric:', '');
+      const curVal = getMetricValue(metricKey, curCtx);
+      const lastVal = getMetricValue(metricKey, lastCtx);
+      const isDownGood = downIsGood(metricKey);
+      cards.push({
+        id: opt.id,
+        label: metricLabelMap.get(metricKey) || metricKey,
+        value: formatPivotValue(curVal, metricKey),
+        sub: subStr(pct(curVal, lastVal)),
+        isImprovement: isDownGood ? curVal <= lastVal : curVal >= lastVal,
+        trend: curVal >= lastVal ? 'up' : 'down'
+      });
+    });
+
+    const byId = new Map(cards.map(c => [c.id, c]));
+    return biCardOrder.map(id => byId.get(id)).filter(Boolean) as typeof cards;
+  }, [filteredData, lastPeriodFilteredData, biCardOrder, allAvailableMetrics, formulaByName, customMetricLabels, biCardOptions]);
 
   // Conditional rendering for LoginPage
   if (!isLoggedIn) {
     return <LoginPage onLoginSuccess={handleLogin} />;
   }
 
-  // Helper function to render the dashboard content
+  // Helper function to render the dashboard content（三个模块：BI看板、数据透视分析、智能全维度诊断报告）
   const renderDashboardContent = () => (
-    <div ref={dashboardRef} className="space-y-12 pb-24 animate-in fade-in duration-1000">
+    <div ref={dashboardRef} className="pb-24 animate-in fade-in duration-1000">
+      {activeReportTab === 'bi' && (
+      <section id="report-module-bi" className="scroll-mt-32">
+        <div className="space-y-12">
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] font-black uppercase tracking-widest text-slate-400">BI 指标卡</div>
+        <button
+          onClick={() => { setBiCardDraft(biCardOrder); setIsBiConfigOpen(true); }}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-700 transition"
+        >
+          <Settings2 size={12} /> 指标设置
+        </button>
+      </div>
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-6">
-        {[
-          { label: 'Total Cost', value: `$${filteredData.reduce((s, r) => s + (r._metrics.cost || 0), 0).toLocaleString()}`, sub: '-12.4% vs last period', trend: 'down' },
-          { label: 'Total Leads', value: filteredData.reduce((s, r) => s + (r._metrics.leads || 0), 0).toLocaleString(), sub: '+8.2% vs last period', trend: 'up' },
-          { label: 'Avg CPL', value: `$${(filteredData.reduce((s, r) => s + (r._metrics.cost || 0), 0) / (filteredData.reduce((s, r) => s + (r._metrics.leads || 0), 0) || 1)).toFixed(2)}`, sub: '-4.1% vs last period', trend: 'down' },
-          { label: 'Avg CTR', value: `${(filteredData.reduce((s, r) => s + (r._metrics.linkClicks || 0), 0) / (filteredData.reduce((s, r) => s + (r._metrics.impressions || 0), 0) || 1) * 100).toFixed(2)}%`, sub: '-2.1% vs last period', trend: 'down' },
-          { label: 'Sub Rate', value: `${(filteredData.reduce((s, r) => s + (r._metrics.leads || 0), 0) / (filteredData.reduce((s, r) => s + (r._metrics.linkClicks || 0), 0) || 1) * 100).toFixed(2)}%`, sub: '+0.4% vs last period', trend: 'up' },
-        ].map((k, idx) => (
+        {biKpiCards.map((k, idx) => (
           <div key={idx} className="bg-slate-900/50 p-8 rounded-[40px] border border-slate-800 shadow-sm flex flex-col justify-between h-44 hover:shadow-xl transition-all group">
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{k.label}</span>
             <div>
               <span className="text-3xl font-black text-white tracking-tight">{k.value}</span>
-              <p className={`text-[10px] font-black mt-2 flex items-center gap-1 ${k.trend === 'up' ? 'text-emerald-500' : 'text-rose-500'}`}>
+              <p className={`text-[10px] font-black mt-2 flex items-center gap-1 ${k.isImprovement ? 'text-emerald-500' : 'text-rose-500'}`}>
                 {k.trend === 'up' ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                 {k.sub}
               </p>
@@ -1000,149 +2149,426 @@ const App = () => {
           </ResponsiveContainer>
         </div>
       </div>
+        </div>
+      </section>
+      )}
 
-      {/* Dimension Analysis Section */}
-      <div className="bg-slate-900/50 p-12 rounded-[56px] border border-slate-800 shadow-sm relative overflow-visible">
-        <div className="flex flex-col md:flex-row md:items-start justify-between mb-10 gap-8 border-b border-slate-800 pb-10 relative overflow-visible">
-          <div className="flex flex-col gap-1">
-            <h3 className="text-3xl font-black text-white tracking-tight leading-tight">维度分析</h3>
-            <p className="text-slate-400 text-[11px] font-black uppercase tracking-[0.2em]">Dimension-Wise Performance Table</p>
+      {activeReportTab === 'pivot' && (
+      <section id="report-module-pivot" className="scroll-mt-32">
+      <div className="bg-slate-900/50 p-10 rounded-[48px] border border-slate-800 shadow-sm relative overflow-visible">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-8">
+          <div>
+            <h3 className="text-2xl font-black text-white tracking-tight">数据透视分析</h3>
+            <p className="text-slate-400 text-[11px] font-black uppercase tracking-[0.2em]">Pivot · Rows / Columns / Values / Filters</p>
           </div>
-
-          {/* Layout group for tabs and tool buttons */}
-          <div className="flex items-center gap-4">
-            {/* Dimension Tab Selector */}
-            <div className="flex items-center gap-1.5 p-1.5 bg-slate-800 border border-slate-700 rounded-[32px] shadow-inner max-w-full overflow-x-auto no-scrollbar">
-              {dimConfigs.map((dim) => (
-                <button key={dim.label} onClick={() => setActiveDashboardDim(dim.label)} className={`px-6 py-2.5 rounded-[24px] text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${activeDashboardDim === dim.label ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'}`}>
-                  {dim.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Tool Buttons Container */}
-            <div className="flex items-center gap-2">
-              {/* Filter Button */}
-              <div className="relative" ref={dimFilterRef}>
-                <button onClick={() => setIsDimFilterOpen(!isDimFilterOpen)} className={`p-3 rounded-2xl border transition shadow-sm h-[44px] w-[44px] flex items-center justify-center ${(dimFilters[activeDashboardDim]?.length > 0) ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'}`} title="筛选维度值">
-                  <Filter size={18} />
-                </button>
-                {isDimFilterOpen && (
-                  <div className="absolute top-full right-0 mt-3 w-72 bg-slate-900 rounded-[32px] shadow-2xl border border-slate-800 p-6 animate-in fade-in zoom-in duration-200 origin-top-right z-[100]">
-                    <div className="flex items-center justify-between mb-4">
-                      <span className="text-[12px] font-black text-white">维度值筛选</span>
-                      <button onClick={toggleSelectAllDimValues} className="text-[10px] font-black text-indigo-400 hover:underline">{dimFilters[activeDashboardDim]?.length === currentDimValues.length ? '取消全选' : '全选'}</button>
-                    </div>
-                    <div className="relative mb-4">
-                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                      <input type="text" placeholder="搜索维度值..." className="w-full bg-slate-800 border border-slate-700 rounded-xl py-2 pl-9 pr-3 text-[11px] outline-none text-white" value={dimValueSearch} onChange={e => setDimValueSearch(e.target.value)} />
-                    </div>
-                    <div className="max-h-60 overflow-y-auto custom-scrollbar pr-1 space-y-1">
-                      {currentDimValues.filter(v => v.toLowerCase().includes(dimValueSearch.toLowerCase())).map(val => (
-                        <button key={val} onClick={() => toggleDimValueFilter(val)} className="w-full flex items-center gap-3 p-2 rounded-xl hover:bg-slate-800 transition text-left">
-                          <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${(dimFilters[activeDashboardDim] || []).includes(val) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-700'}`}>
-                            {(dimFilters[activeDashboardDim] || []).includes(val) && <Check size={10} className="text-white" strokeWidth={4} />}
-                          </div>
-                          <span className="text-[11px] font-bold text-slate-200 truncate">{val}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => setIsSavePivotModalOpen(true)} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition">保存为报告</button>
+            <div className="relative" ref={pivotPresetDropdownRef}>
+              <button
+                onClick={() => setIsPivotPresetDropdownOpen(v => !v)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition flex items-center gap-2"
+              >
+                已保存报告
+                {pivotPresets.length > 0 && <span className="bg-indigo-600 text-white text-[10px] px-1.5 py-0.5 rounded-full">{pivotPresets.length}</span>}
+                <ChevronDown size={12} className={`transition-transform ${isPivotPresetDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {isPivotPresetDropdownOpen && (
+                <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-800 rounded-xl shadow-xl p-2 z-20 max-h-64 overflow-y-auto custom-scrollbar">
+                  {pivotPresets.length === 0 ? (
+                    <p className="px-3 py-4 text-xs text-slate-500 text-center">暂无已保存报告</p>
+                  ) : (
+                    pivotPresets.map(p => (
+                      <div
+                        key={p.id}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800 transition group cursor-pointer"
+                        onClick={() => handleApplyPivotPreset(p)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleApplyPivotPreset(p); }}
+                      >
+                        <span className="flex-1 text-left text-xs font-bold text-slate-200 truncate min-w-0">
+                          {p.name}
+                        </span>
+                        <button onClick={(e) => handleUpdatePivotPreset(p.id, e)} className="p-1 text-slate-500 hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="用当前配置覆盖">
+                          <Edit3 size={12} />
                         </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Settings Button */}
-              <div className="relative" ref={fieldConfigRef}>
-                <button onClick={() => setIsFieldConfigOpen(!isFieldConfigOpen)} className="bg-slate-800 p-3 rounded-2xl border border-slate-700 hover:bg-slate-700 transition shadow-sm text-slate-400 hover:text-slate-200 h-[44px] w-[44px] flex items-center justify-center" title="配置指标显示">
-                  <SettingsIcon size={18} />
-                </button>
-                {isFieldConfigOpen && (
-                  <div className="absolute top-full right-0 mt-3 w-80 bg-slate-900 rounded-[32px] shadow-2xl border border-slate-800 p-6 animate-in fade-in zoom-in duration-200 origin-top-right z-[100]">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${activeTableMetrics.length === allAvailableMetrics.length ? 'bg-indigo-600 border-indigo-600' : 'border-slate-700'}`}
-                          onClick={() => {
-                            if (activeTableMetrics.length === allAvailableMetrics.length) setActiveTableMetrics(['cost', 'leads']);
-                            else setActiveTableMetrics(allAvailableMetrics.map(m => m.key));
-                          }}>
-                          <Check size={12} className="text-white" />
-                        </div>
-                        <span className="text-[13px] font-black text-white">已选列表</span>
+                        <button onClick={(e) => handleRemovePivotPreset(p.id, e)} className="p-1 text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="删除">
+                          <Trash2 size={12} />
+                        </button>
                       </div>
-                      <span className="text-[11px] font-black text-slate-400">({activeTableMetrics.length}/{allAvailableMetrics.length})</span>
-                    </div>
-                    <div className="relative mb-5">
-                      <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
-                      <input type="text" placeholder="搜索指标..." className="w-full bg-slate-800 border border-slate-700 rounded-xl py-3 pl-10 pr-4 text-[13px] outline-none focus:border-indigo-400 transition-all shadow-inner text-white" value={fieldSearchTerm} onChange={(e) => setFieldSearchTerm(e.target.value)} />
-                    </div>
-                    <div className="max-h-80 overflow-y-auto custom-scrollbar pr-2 space-y-1">
-                      {allAvailableMetrics.filter(m => m.label.toLowerCase().includes(fieldSearchTerm.toLowerCase())).map((m) => (
-                        <button key={m.key} onClick={() => toggleTableMetric(m.key)} className="w-full flex items-center gap-3 p-3 rounded-2xl hover:bg-slate-800 transition-all group text-left">
-                          <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${activeTableMetrics.includes(m.key) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-700'}`}>
-                            {activeTableMetrics.includes(m.key) && <Check size={12} className="text-white" strokeWidth={3} />}
-                          </div>
-                          <span className={`text-[12px] font-bold flex-1 truncate ${activeTableMetrics.includes(m.key) ? 'text-white' : 'text-slate-400'}`}>{m.label}</span>
-                          <GripVertical size={14} className="text-slate-700 opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
+            <button onClick={copyPivotToClipboard} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition">复制表格</button>
+            <div className="relative" ref={pivotExportRef}>
+              <button
+                onClick={() => setIsPivotExportOpen(v => !v)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition flex items-center gap-2"
+              >
+                导出
+                <ChevronDown size={12} className={`transition-transform ${isPivotExportOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {isPivotExportOpen && (
+                <div className="absolute right-0 mt-2 w-36 bg-slate-900 border border-slate-800 rounded-xl shadow-xl p-2 z-20">
+                  <button onClick={() => { exportPivotData('csv'); setIsPivotExportOpen(false); }} className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 rounded-lg">导出 CSV</button>
+                  <button onClick={() => { exportPivotData('xlsx'); setIsPivotExportOpen(false); }} className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 rounded-lg">导出 Excel</button>
+                </div>
+              )}
+            </div>
+            <button onClick={() => setIsPivotDrawerOpen(v => !v)} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-700 transition">
+              {isPivotDrawerOpen ? '收起字段配置' : '字段配置'}
+            </button>
           </div>
         </div>
 
-        <div className="overflow-x-auto custom-scrollbar no-scrollbar-at-small pb-4">
-          <table className="w-full text-left border-separate border-spacing-y-4 min-w-[1000px]">
-            <thead>
-              <tr>
-                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest sticky left-0 bg-slate-900/50 z-20 min-w-[200px]">Dimension Value</th>
-                {activeTableMetrics.map(mKey => (
-                  <th key={mKey} className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right whitespace-nowrap">
-                    {allAvailableMetrics.find(a => a.key === mKey)?.label || mKey}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {tableData.length > 0 ? (
-                tableData.map((row, idx) => (
-                  <tr key={idx} className="bg-slate-800/50 hover:bg-slate-800 transition-all group rounded-3xl border border-transparent hover:border-slate-700 hover:shadow-xl hover:shadow-slate-900/10">
-                    <td className="px-6 py-6 font-black text-white text-xs rounded-l-[24px] sticky left-0 bg-inherit z-10 group-hover:bg-slate-800 shadow-[10px_0_15px_-10px_rgba(0,0,0,0.05)]">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-[10px] font-black text-slate-400">{idx + 1}</div>
-                        <span className="truncate max-w-[240px]">{row.label}</span>
+        <div className={`grid gap-6 ${isPivotDrawerOpen ? 'lg:grid-cols-[1fr_360px]' : 'grid-cols-1'}`}>
+          <div className="min-w-0">
+            {pivotValues.length === 0 ? (
+              <div className="h-80 flex flex-col items-center justify-center border-2 border-dashed border-slate-800 rounded-[32px] bg-slate-800/30 text-center px-6">
+                <div className="w-14 h-14 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mb-4">
+                  <TableIcon size={24} className="text-indigo-400" />
+                </div>
+                <p className="text-slate-300 font-black text-sm mb-2">请先配置透视字段</p>
+                <p className="text-slate-500 text-xs">添加 行 / 列 / 值 字段后即可生成透视结果</p>
+                <button onClick={() => setIsPivotDrawerOpen(true)} className="mt-4 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-700 transition">打开字段配置</button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto custom-scrollbar no-scrollbar-at-small pb-4">
+                <table className="w-full text-left border-separate border-spacing-y-2 min-w-[900px]">
+                  <thead>
+                    <tr>
+                      {(pivotResult?.rowDims.length ? pivotResult.rowDims : ['维度']).map((h, idx) => (
+                        <th key={idx} rowSpan={pivotResult?.valueKeys.length && pivotResult.valueKeys.length > 1 ? 2 : 1} className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-900/50 sticky left-0 z-20 min-w-[140px]">
+                          {h}
+                        </th>
+                      ))}
+                      {pivotResult?.colKeys.map(colKey => (
+                        pivotResult.valueKeys.length === 1 ? (
+                          <th
+                            key={colKey}
+                            className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center cursor-pointer hover:bg-slate-700/50 select-none"
+                            onClick={() => {
+                              const vk = pivotResult.valueKeys[0];
+                              setPivotSort(prev => prev?.colKey === colKey && prev?.valueKey === vk && prev.dir === 'asc' ? { colKey, valueKey: vk, dir: 'desc' } : { colKey, valueKey: vk, dir: 'asc' });
+                            }}
+                          >
+                            <span className="inline-flex items-center gap-1">
+                              {pivotResult.colLabels[colKey]}
+                              {pivotSort?.colKey === colKey && pivotSort?.valueKey === pivotResult.valueKeys[0] && (pivotSort.dir === 'asc' ? <ChevronUp size={12} className="opacity-80" /> : <ChevronDown size={12} className="opacity-80" />)}
+                            </span>
+                          </th>
+                        ) : (
+                          <th key={colKey} colSpan={pivotResult.valueKeys.length} className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
+                            {pivotResult.colLabels[colKey]}
+                          </th>
+                        )
+                      ))}
+                    </tr>
+                    {pivotResult?.valueKeys.length && pivotResult.valueKeys.length > 1 && (
+                      <tr>
+                        {pivotResult.colKeys.map(colKey => (
+                          pivotResult.valueKeys.map(vk => (
+                            <th
+                              key={`${colKey}-${vk}`}
+                              className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right whitespace-nowrap cursor-pointer hover:bg-slate-700/50 select-none"
+                              onClick={() => setPivotSort(prev => prev?.colKey === colKey && prev?.valueKey === vk && prev.dir === 'asc' ? { colKey, valueKey: vk, dir: 'desc' } : { colKey, valueKey: vk, dir: 'asc' })}
+                            >
+                              <span className="inline-flex items-center gap-1 justify-end w-full">
+                                {pivotValueMeta.get(vk)?.label || vk}
+                                {pivotSort?.colKey === colKey && pivotSort?.valueKey === vk && (pivotSort.dir === 'asc' ? <ChevronUp size={12} className="opacity-80" /> : <ChevronDown size={12} className="opacity-80" />)}
+                              </span>
+                            </th>
+                          ))
+                        ))}
+                      </tr>
+                    )}
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      let lastRowLabels: string[] = [];
+                      return pivotDisplayRows.map((row, idx) => {
+                        const isSubtotal = row.type === 'subtotal';
+                        const isGrand = row.type === 'grand_total';
+                        let displayCells = row.displayCells;
+                        if (row.type === 'data' && (pivotResult.rowDims.length || 0) > 1) {
+                          displayCells = row.displayCells.map((val, i) => {
+                            const samePrefix = row.displayCells.slice(0, i + 1).every((v, idx2) => v === lastRowLabels[idx2]);
+                            return samePrefix ? '' : val;
+                          });
+                          lastRowLabels = row.displayCells;
+                        } else if (row.type !== 'data') {
+                          lastRowLabels = [];
+                        }
+                        return (
+                          <tr key={row.key + idx} className={`border border-transparent ${isGrand ? 'bg-indigo-900/20' : isSubtotal ? 'bg-slate-800/60' : 'bg-slate-800/40'} rounded-3xl`}>
+                            {(pivotResult.rowDims.length ? pivotResult.rowDims : ['维度']).map((_, i) => (
+                              <td key={i} className={`px-4 py-3 text-xs font-black ${isGrand ? 'text-indigo-300' : isSubtotal ? 'text-slate-200' : 'text-white'} sticky left-0 bg-inherit z-10`}>
+                                {displayCells[i] || ''}
+                              </td>
+                            ))}
+                            {pivotResult.colKeys.map(colKey => (
+                              pivotResult.valueKeys.map(vk => (
+                                <td key={`${row.key}-${colKey}-${vk}`} className={`px-4 py-3 text-right text-xs ${isGrand ? 'text-indigo-200 font-black' : isSubtotal ? 'text-slate-200 font-black' : 'text-slate-300 font-bold'}`}>
+                                  {formatPivotValue(row.cells[colKey]?.[vk] ?? null, vk)}
+                                </td>
+                              ))
+                            ))}
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {isPivotDrawerOpen && (
+            <div className="bg-slate-900/70 border border-slate-800 rounded-[32px] p-4 space-y-6">
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-[11px] font-black uppercase tracking-widest text-slate-400">平台范围</div>
+                  <button
+                    onClick={togglePivotPlatformAll}
+                    className="text-[10px] font-black text-slate-400 hover:text-slate-200 transition"
+                  >
+                    {pivotPlatformScopes.length === DEFAULT_PIVOT_PLATFORM_SCOPES.length ? '清空' : '全选'}
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {PIVOT_PLATFORM_OPTIONS.map(opt => {
+                    const active = pivotPlatformScopes.includes(opt.key);
+                    return (
+                      <label key={opt.key} className="flex items-center gap-2 text-xs text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={active}
+                          onChange={() => togglePivotPlatformScope(opt.key)}
+                        />
+                        <span>{opt.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {pivotPlatformScopes.length === 0 && (
+                  <div className="text-[10px] text-slate-500 mt-2">未选择平台将无数据展示</div>
+                )}
+              </div>
+
+              <div>
+                <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">筛选器</div>
+                <select
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mb-3"
+                  onChange={e => {
+                    handleAddPivotFilter(e.target.value);
+                    e.currentTarget.value = '';
+                  }}
+                  defaultValue=""
+                >
+                  <option value="">添加筛选字段</option>
+                  {pivotDimensionFields
+                    .filter(f => !pivotFilters.some(p => p.fieldKey === f.key))
+                    .map(f => (
+                      <option key={f.key} value={f.key}>{f.label}</option>
+                    ))}
+                </select>
+                <div className="space-y-3">
+                  {pivotFilters.map(f => {
+                    const field = pivotDimensionFields.find(df => df.key === f.fieldKey);
+                    const isDate = field?.type === 'date';
+                    const options = pivotDimensionValueOptions[f.fieldKey] || [];
+                    const filteredOptions = options.filter(v => v.toLowerCase().includes((f.search || '').toLowerCase()));
+                    return (
+                      <div key={f.id} className="bg-slate-800/60 border border-slate-700 rounded-2xl p-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black text-white">{f.label}</span>
+                          <button onClick={() => removePivotFilter(f.id)} className="text-slate-400 hover:text-red-400">
+                            <X size={14} />
+                          </button>
+                        </div>
+                        {!isDate && (
+                          <select
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white mt-2"
+                            value={f.mode}
+                            onChange={e => updatePivotFilter(f.id, { mode: e.target.value as any, selectedValues: [] })}
+                          >
+                            <option value="multi">多选</option>
+                            <option value="contains">包含</option>
+                            <option value="not_contains">不包含</option>
+                          </select>
+                        )}
+                        {isDate ? (
+                          <div className="grid grid-cols-2 gap-2 mt-2">
+                            <input type="date" className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white" value={f.dateRange.start} onChange={e => updatePivotFilter(f.id, { dateRange: { ...f.dateRange, start: e.target.value } })} />
+                            <input type="date" className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white" value={f.dateRange.end} onChange={e => updatePivotFilter(f.id, { dateRange: { ...f.dateRange, end: e.target.value } })} />
+                          </div>
+                        ) : f.mode === 'multi' ? (
+                          <div className="mt-2">
+                            <input
+                              type="text"
+                              placeholder="搜索..."
+                              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white mb-2"
+                              value={f.search}
+                              onChange={e => updatePivotFilter(f.id, { search: e.target.value })}
+                            />
+                            <div className="max-h-40 overflow-y-auto custom-scrollbar pr-1 space-y-1">
+                              {filteredOptions.map(v => {
+                                const active = f.selectedValues.includes(v);
+                                return (
+                                  <button
+                                    key={v}
+                                    onClick={() => {
+                                      const next = active ? f.selectedValues.filter(x => x !== v) : [...f.selectedValues, v];
+                                      updatePivotFilter(f.id, { selectedValues: next });
+                                    }}
+                                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left ${active ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+                                  >
+                                    <div className={`w-3 h-3 rounded border ${active ? 'bg-white border-white' : 'border-slate-500'}`} />
+                                    <span className="text-[11px] truncate">{v}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : (
+                          <input
+                            type="text"
+                            placeholder={f.mode === 'contains' ? '包含关键词' : '不包含关键词'}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white mt-2"
+                            value={f.textValue}
+                            onChange={e => updatePivotFilter(f.id, { textValue: e.target.value })}
+                          />
+                        )}
                       </div>
-                    </td>
-                    {activeTableMetrics.map((mKey, mIdx) => {
-                      const val = row[mKey] || 0;
-                      const isLast = mIdx === activeTableMetrics.length - 1;
-                      const isFinancial = mKey.toLowerCase().includes('cost') || mKey.toLowerCase().includes('value') || mKey.toLowerCase().includes('cpm') || mKey.toLowerCase().includes('cpc');
-                      return (
-                        <td key={mKey} className={`px-6 py-6 text-right font-black text-xs ${isLast ? 'rounded-r-[24px]' : ''} ${isFinancial ? 'text-white' : 'text-slate-300'}`}>
-                          {isFinancial ? `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : val.toLocaleString()}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={activeTableMetrics.length + 1} className="px-6 py-20 text-center text-slate-500 font-black uppercase tracking-[0.2em] text-[10px]">No data available for the selected dimension and filters.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">行</div>
+                <select
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mb-3"
+                  onChange={e => {
+                    addPivotListItem(pivotRows, setPivotRows, e.target.value);
+                    e.currentTarget.value = '';
+                  }}
+                  defaultValue=""
+                >
+                  <option value="">添加行维度</option>
+                  {pivotDimensionFields.filter(f => !pivotRows.includes(f.key)).map(f => (
+                    <option key={f.key} value={f.key}>{f.label}</option>
+                  ))}
+                </select>
+                <div className="space-y-2">
+                  {pivotRows.map(k => (
+                    <div key={k} className="flex items-center gap-2 bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2">
+                      <span className="text-xs font-bold text-white flex-1">{pivotDimensionFields.find(f => f.key === k)?.label || k}</span>
+                      <button onClick={() => movePivotListItem(pivotRows, setPivotRows, k, 'up')} className="text-slate-400 hover:text-white"><ChevronUp size={14} /></button>
+                      <button onClick={() => movePivotListItem(pivotRows, setPivotRows, k, 'down')} className="text-slate-400 hover:text-white"><ChevronDown size={14} /></button>
+                      <button onClick={() => removePivotListItem(pivotRows, setPivotRows, k)} className="text-slate-400 hover:text-red-400"><Trash2 size={14} /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">列</div>
+                <select
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mb-3"
+                  onChange={e => {
+                    addPivotListItem(pivotColumns, setPivotColumns, e.target.value);
+                    e.currentTarget.value = '';
+                  }}
+                  defaultValue=""
+                >
+                  <option value="">添加列维度</option>
+                  {pivotDimensionFields.filter(f => !pivotColumns.includes(f.key)).map(f => (
+                    <option key={f.key} value={f.key}>{f.label}</option>
+                  ))}
+                </select>
+                <div className="space-y-2">
+                  {pivotColumns.map(k => (
+                    <div key={k} className="flex items-center gap-2 bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2">
+                      <span className="text-xs font-bold text-white flex-1">{pivotDimensionFields.find(f => f.key === k)?.label || k}</span>
+                      <button onClick={() => movePivotListItem(pivotColumns, setPivotColumns, k, 'up')} className="text-slate-400 hover:text-white"><ChevronUp size={14} /></button>
+                      <button onClick={() => movePivotListItem(pivotColumns, setPivotColumns, k, 'down')} className="text-slate-400 hover:text-white"><ChevronDown size={14} /></button>
+                      <button onClick={() => removePivotListItem(pivotColumns, setPivotColumns, k)} className="text-slate-400 hover:text-red-400"><Trash2 size={14} /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">值</div>
+                <select
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mb-3"
+                  onChange={e => {
+                    addPivotListItem(pivotValues, setPivotValues, e.target.value);
+                    e.currentTarget.value = '';
+                  }}
+                  defaultValue=""
+                >
+                  <option value="">添加指标或公式</option>
+                  {pivotValueOptions.filter(v => !pivotValues.includes(v.key)).map(v => (
+                    <option key={v.key} value={v.key}>{v.label}</option>
+                  ))}
+                </select>
+                <div className="space-y-2">
+                  {pivotValues.map(k => (
+                    <div key={k} className="flex items-center gap-2 bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2">
+                      <span className="text-xs font-bold text-white flex-1">{pivotValueMeta.get(k)?.label || k}</span>
+                      <button onClick={() => movePivotListItem(pivotValues, setPivotValues, k, 'up')} className="text-slate-400 hover:text-white"><ChevronUp size={14} /></button>
+                      <button onClick={() => movePivotListItem(pivotValues, setPivotValues, k, 'down')} className="text-slate-400 hover:text-white"><ChevronDown size={14} /></button>
+                      <button onClick={() => removePivotListItem(pivotValues, setPivotValues, k)} className="text-slate-400 hover:text-red-400"><Trash2 size={14} /></button>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 text-[10px] text-slate-500">汇总方式默认：求和；公式字段按因子汇总后再计算。</div>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">展示配置</div>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-xs text-slate-200">
+                    <input type="checkbox" checked={pivotDisplay.showSubtotal} onChange={e => setPivotDisplay(prev => ({ ...prev, showSubtotal: e.target.checked }))} />
+                    显示小计（按行维度层级）
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-slate-200">
+                    <input type="checkbox" checked={pivotDisplay.showGrandTotal} onChange={e => setPivotDisplay(prev => ({ ...prev, showGrandTotal: e.target.checked }))} />
+                    显示合计（行/列二选一）
+                  </label>
+                  {pivotDisplay.showGrandTotal && (
+                    <select
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                      value={pivotDisplay.totalAxis}
+                      onChange={e => setPivotDisplay(prev => ({ ...prev, totalAxis: e.target.value as 'row' | 'column' }))}
+                    >
+                      <option value="row">行合计</option>
+                      <option value="column">列合计</option>
+                    </select>
+                  )}
+                  <div className="text-[10px] text-slate-500">空单元格显示：空白</div>
+                  <div className="text-[10px] text-slate-500">金额：$ + 2 位小数；比例：% + 2 位小数</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+      </section>
+      )}
 
+      {activeReportTab === 'ai' && (
+      <section id="report-module-ai" className="scroll-mt-32">
       <div className="bg-slate-900/50 p-12 rounded-[56px] border border-slate-800 shadow-sm overflow-hidden relative">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
             <div className="w-10 h-10 bg-indigo-900/50 text-indigo-400 rounded-2xl flex items-center justify-center"><Zap size={20} /></div>
             <div>
-              <h3 className="text-2xl font-black text-white tracking-tight">AI 智能全维度诊断报告</h3>
+              <h3 className="text-xl font-black text-white tracking-tight">AI 智能全维度诊断报告</h3>
               <p className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Aetherion Standard • Growth Scientist Insight</p>
             </div>
           </div>
@@ -1170,6 +2596,8 @@ const App = () => {
           </div>
         )}
       </div>
+      </section>
+      )}
     </div>
   );
 
@@ -1328,38 +2756,90 @@ const App = () => {
         ) : (
           /* --- Report View --- */
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* Header controls for report view */}
-            <div className="flex flex-col gap-6 mb-8">
-              <button
-                onClick={() => setSelectedProject(null)}
-                className="self-start flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors group mb-4"
-              >
-                <ArrowRight className="w-4 h-4 rotate-180 group-hover:-translate-x-1 transition-transform" />
-                Back to Projects
-              </button>
-
+            {/* 吸顶：项目信息 + 时间范围选择 */}
+            <div className="sticky top-16 z-30 -mx-4 px-4 py-4 mb-6 bg-slate-950/95 backdrop-blur-md border-b border-slate-800">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-2xl font-bold text-white flex items-center gap-3">
-                    {selectedProject.iconUrl && <img src={selectedProject.iconUrl} className="w-8 h-8" />}
-                    {selectedProject.projectName}
-                  </h2>
-                  <p className="text-slate-400 text-sm mt-1">Growth Scientist Analysis Report</p>
+                <div className="flex items-center gap-4 flex-wrap">
+                  <button
+                    onClick={() => setSelectedProject(null)}
+                    className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors group shrink-0"
+                  >
+                    <ArrowRight className="w-4 h-4 rotate-180 group-hover:-translate-x-1 transition-transform" />
+                    Back to Projects
+                  </button>
+                  <div className="flex items-center gap-3 border-l border-slate-800 pl-4">
+                    {selectedProject.iconUrl && <img src={selectedProject.iconUrl} className="w-8 h-8 rounded-lg" alt="" />}
+                    <div>
+                      <h2 className="text-xl font-bold text-white">{selectedProject.projectName}</h2>
+                      <p className="text-slate-400 text-xs mt-0.5">Growth Scientist Analysis Report</p>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-3 bg-slate-900/50 p-1.5 rounded-xl border border-slate-800">
-                  <div className="flex items-center gap-2 px-3 py-2 bg-slate-800 rounded-lg border border-slate-700">
-                    <Calendar className="w-4 h-4 text-slate-400" />
-                    <span className="text-sm font-medium">{dateRange.start}</span>
-                    <ArrowRight className="w-3 h-3 text-slate-600" />
-                    <span className="text-sm font-medium">{dateRange.end}</span>
-                  </div>
+                <div className="flex flex-wrap items-center gap-3 bg-slate-900/50 p-1.5 rounded-xl border border-slate-800">
+                  {/* 报告时间范围：仅在首次获取数据的时间范围内可选 */}
+                  {(() => {
+                    const bounds = reportDateRangeBounds ?? (availableDates.length
+                      ? { start: availableDates[0], end: availableDates[availableDates.length - 1] }
+                      : null);
+                    if (!bounds) {
+                      return (
+                        <div className="flex items-center gap-2 px-3 py-2 bg-slate-800 rounded-lg border border-slate-700">
+                          <Calendar className="w-4 h-4 text-slate-400" />
+                          <span className="text-sm text-slate-500">请先获取数据以选择报告时间范围</span>
+                        </div>
+                      );
+                    }
+                    const startVal = dateRange.start || bounds.start;
+                    const endVal = dateRange.end || bounds.end;
+                    return (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-2 px-2 py-1.5 bg-slate-800 rounded-lg border border-slate-700">
+                          <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
+                          <label className="text-[10px] text-slate-500 uppercase tracking-wider shrink-0">开始</label>
+                          <input
+                            type="date"
+                            value={startVal}
+                            min={bounds.start}
+                            max={endVal}
+                            onChange={e => {
+                              const v = e.target.value;
+                              setDateRange(prev => {
+                                const end = prev.end || bounds.end;
+                                return { ...prev, start: v, end: v > end ? v : end };
+                              });
+                            }}
+                            className="bg-transparent text-sm font-medium text-white outline-none focus:ring-0 border-0 p-0 min-w-0"
+                          />
+                        </div>
+                        <ArrowRight className="w-3 h-3 text-slate-600 shrink-0" />
+                        <div className="flex items-center gap-2 px-2 py-1.5 bg-slate-800 rounded-lg border border-slate-700">
+                          <label className="text-[10px] text-slate-500 uppercase tracking-wider shrink-0">结束</label>
+                          <input
+                            type="date"
+                            value={endVal}
+                            min={startVal}
+                            max={bounds.end}
+                            onChange={e => {
+                              const v = e.target.value;
+                              setDateRange(prev => {
+                                const start = prev.start || bounds.start;
+                                return { ...prev, end: v, start: v < start ? v : start };
+                              });
+                            }}
+                            className="bg-transparent text-sm font-medium text-white outline-none focus:ring-0 border-0 p-0 min-w-0"
+                          />
+                        </div>
+                        <span className="text-[10px] text-slate-500">（可选范围 {bounds.start} ~ {bounds.end}）</span>
+                      </div>
+                    );
+                  })()}
                   {/* Refresh Button */}
                   <button
                     onClick={handleLoadDataFromApi}
                     disabled={isLoadingData}
                     className="p-2 hover:bg-indigo-600 hover:text-white rounded-lg text-indigo-400 transition-colors disabled:opacity-50"
-                    title="Refresh Data"
+                    title="重新获取数据"
                   >
                     <div className={isLoadingData ? "animate-spin" : ""}>
                       <Database className="w-4 h-4" />
@@ -1367,12 +2847,29 @@ const App = () => {
                   </button>
                 </div>
               </div>
+              {/* Tab 栏：仅在 dashboard 步骤显示 */}
+              {step === 'dashboard' && (
+                <div className="flex items-center gap-1.5 mt-4 pt-4 border-t border-slate-800">
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mr-2">模块</span>
+                  {[
+                    { id: 'bi' as const, label: 'BI 看板', icon: LayoutDashboard },
+                    { id: 'pivot' as const, label: '数据透视分析', icon: TableIcon },
+                    { id: 'ai' as const, label: '智能全维度诊断报告', icon: Zap },
+                  ].map(({ id, label, icon: Icon }) => (
+                    <button
+                      key={id}
+                      onClick={() => setActiveReportTab(id)}
+                      className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${activeReportTab === id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}
+                    >
+                      <Icon className="w-4 h-4" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* --- Data Source Config Removed as requested in previous task, integrating directly --- */}
-
-            {/* --- Main Dashboard Content --- */}
-            {/* Reuse existing dashboard layout but ensure it's wrapped properly */}
+            {/* --- 报告主体：按 Tab 切换模块 --- */}
             <div className="space-y-6">
 
               {/* 1. Account Selection (if multiple accounts) */}
@@ -1523,9 +3020,27 @@ const App = () => {
                           </div>
                         </div>
                       </div>
+                      {activePlatformTab === 'google' && (
+                        <div className="flex items-center gap-2">
+                          {GOOGLE_TYPES.map(t => (
+                            <button
+                              key={t}
+                              onClick={() => setActiveGoogleType(t)}
+                              className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeGoogleType === t ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 bg-slate-800'}`}
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       <div className="grid grid-cols-1 gap-6">
-                        {Object.keys(mappings[activePlatformTab]).map(key => {
-                          const val = (mappings[activePlatformTab] as any)[key];
+                        {activeHeaders.length === 0 && (
+                          <div className="px-4 py-3 rounded-2xl border border-dashed border-slate-700 text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                            请先获取广告数据
+                          </div>
+                        )}
+                        {Object.keys(activeMapping).map(key => {
+                          const val = (activeMapping as any)[key];
                           if (val === undefined) return null;
                           return (
                             <div key={key} className="space-y-2 group relative">
@@ -1539,10 +3054,20 @@ const App = () => {
                               </div>
                               <select className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl p-4 text-[11px] font-black outline-none text-white" value={val || ''} onChange={e => {
                                 const val = e.target.value;
-                                setMappings(p => ({ ...p, [activePlatformTab]: { ...p[activePlatformTab], [key]: val } }));
+                                if (activePlatformTab === 'facebook') {
+                                  setMappings(p => ({ ...p, facebook: { ...p.facebook, [key]: val } }));
+                                } else {
+                                  setMappings(p => ({
+                                    ...p,
+                                    google: {
+                                      ...p.google,
+                                      [activeGoogleType]: { ...p.google[activeGoogleType], [key]: val }
+                                    }
+                                  }));
+                                }
                               }}>
                                 <option value="">未选择 (Unmapped)</option>
-                                {headers.map(h => <option key={h} value={h}>{h}</option>)}
+                                {activeHeaders.map(h => <option key={h} value={h}>{h}</option>)}
                               </select>
                             </div>
                           );
@@ -1644,7 +3169,7 @@ const App = () => {
                           const existing = dimConfigs.find(d => d.label === dim);
                           const currentSource = existing?.source || 'campaign';
                           const currentDelimiter = existing?.delimiter || '_';
-                          const sampleStr = namingSamples[currentSource as 'campaign' | 'adSet' | 'ad'] || '';
+                          const sampleStr = namingSamples[currentSource as 'campaign' | 'adSet' | 'ad' | 'age' | 'gender'] || '';
                           const sampleParts = sampleStr ? sampleStr.split(currentDelimiter) : [];
                           return (
                             <div key={dim} className="flex flex-col md:flex-row md:items-center gap-4 p-5 bg-slate-800 rounded-3xl border border-slate-700 shadow-sm group hover:border-purple-700 transition-all relative">
@@ -1663,30 +3188,38 @@ const App = () => {
                                   <option value="campaign">Campaign (Naming)</option>
                                   <option value="adSet">Ad Set (Naming)</option>
                                   <option value="ad">Ad (Naming)</option>
+                                  <option value="age">Age</option>
+                                  <option value="gender">Gender</option>
                                   <option value="platform">Platform</option>
                                 </select>
-                                <select className="flex-[1] min-w-[80px] bg-slate-900 text-[11px] font-black px-3 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-center text-white" value={existing?.delimiter || '_'} onChange={e => {
-                                  const delimiter = e.target.value;
-                                  if (existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, delimiter }]);
-                                  else setDimConfigs(p => [...p, { label: dim, source: 'campaign', index: 0, delimiter }]);
-                                }}>
-                                  <option value="_">_ (下划线 | Underscore)</option>
-                                  <option value="-">- (中划线 | Hyphen)</option>
-                                </select>
-                                <select className="flex-[2] min-w-[140px] bg-slate-900 text-[11px] font-black px-5 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.index ?? ''} onChange={e => {
-                                  const index = parseInt(e.target.value);
-                                  if (!isNaN(index) && existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, index }]);
-                                  else if (!isNaN(index)) setDimConfigs(p => [...p, { label: dim, source: 'campaign', index, delimiter: '_' }]);
-                                }}>
-                                  <option value="">索引 (Index)</option>
-                                  {sampleParts.length > 0 ? (
-                                    sampleParts.map((part, i) => (
-                                      <option key={i} value={i}>Part {i} ({part})</option>
-                                    ))
-                                  ) : (
-                                    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => <option key={i} value={i}>{i}</option>)
-                                  )}
-                                </select>
+                                {(currentSource === 'age' || currentSource === 'gender') ? (
+                                  <span className="flex-[1] min-w-[80px] flex items-center justify-center px-3 py-4 rounded-2xl bg-slate-800/60 border border-slate-700 text-[10px] font-black text-slate-400 uppercase tracking-widest">直接取值</span>
+                                ) : (
+                                  <>
+                                    <select className="flex-[1] min-w-[80px] bg-slate-900 text-[11px] font-black px-3 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-center text-white" value={existing?.delimiter || '_'} onChange={e => {
+                                      const delimiter = e.target.value;
+                                      if (existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, delimiter }]);
+                                      else setDimConfigs(p => [...p, { label: dim, source: 'campaign', index: 0, delimiter }]);
+                                    }}>
+                                      <option value="_">_ (下划线 | Underscore)</option>
+                                      <option value="-">- (中划线 | Hyphen)</option>
+                                    </select>
+                                    <select className="flex-[2] min-w-[140px] bg-slate-900 text-[11px] font-black px-5 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.index ?? ''} onChange={e => {
+                                      const index = parseInt(e.target.value);
+                                      if (!isNaN(index) && existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, index }]);
+                                      else if (!isNaN(index)) setDimConfigs(p => [...p, { label: dim, source: 'campaign', index, delimiter: '_' }]);
+                                    }}>
+                                      <option value="">索引 (Index)</option>
+                                      {sampleParts.length > 0 ? (
+                                        sampleParts.map((part, i) => (
+                                          <option key={i} value={i}>Part {i} ({part})</option>
+                                        ))
+                                      ) : (
+                                        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => <option key={i} value={i}>{i}</option>)
+                                      )}
+                                    </select>
+                                  </>
+                                )}
                               </div>
                             </div>
                           );
@@ -1813,6 +3346,106 @@ const App = () => {
             <div className="mt-8 pt-6 border-t border-slate-800 flex gap-4">
               <button onClick={() => { setIsFormulaModalOpen(false); setFormulaToEdit(null); }} className="flex-1 py-4 font-black text-slate-400 text-xs hover:text-slate-200 transition">取消</button>
               <button onClick={handleSaveFormula} className="flex-[2] bg-indigo-600 text-white py-4 rounded-2xl font-black text-sm shadow-xl hover:bg-indigo-700 transition-all active:scale-95">保存配置</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 保存透视报告弹窗 */}
+      {isSavePivotModalOpen && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 w-full max-w-md rounded-[32px] shadow-2xl p-8 animate-in fade-in zoom-in duration-300 border border-slate-800">
+            <div className="flex items-center justify-between mb-6">
+              <h4 className="text-xl font-black text-white">保存为报告</h4>
+              <button onClick={() => { setIsSavePivotModalOpen(false); setPivotPresetNameInput(''); }} className="p-2 hover:bg-slate-800 rounded-full transition text-slate-400"><X size={20} /></button>
+            </div>
+            <div className="mb-6">
+              <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block tracking-widest">报告名称</label>
+              <input
+                type="text"
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 font-black outline-none focus:border-indigo-500 text-base text-white"
+                placeholder="例如：按国家+Campaign 成本透视"
+                value={pivotPresetNameInput}
+                onChange={e => setPivotPresetNameInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleSavePivotPreset(); }}
+              />
+            </div>
+            <div className="flex gap-4">
+              <button onClick={() => { setIsSavePivotModalOpen(false); setPivotPresetNameInput(''); }} className="flex-1 py-3 rounded-xl font-black text-slate-400 text-xs hover:text-slate-200 transition">取消</button>
+              <button onClick={handleSavePivotPreset} disabled={!pivotPresetNameInput.trim()} className="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-black text-sm hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed">确定</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BI 指标卡配置弹窗 */}
+      {isBiConfigOpen && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 w-full max-w-lg rounded-[32px] shadow-2xl p-8 animate-in fade-in zoom-in duration-300 border border-slate-800">
+            <div className="flex items-center justify-between mb-6">
+              <h4 className="text-xl font-black text-white">BI 指标卡设置</h4>
+              <button onClick={() => setIsBiConfigOpen(false)} className="p-2 hover:bg-slate-800 rounded-full transition text-slate-400"><X size={20} /></button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">已选指标</div>
+                <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-1">
+                  {biCardDraft.map(id => {
+                    const option = biCardOptions.find(o => o.id === id);
+                    if (!option) return null;
+                    return (
+                      <div key={id} className="flex items-center gap-3 bg-slate-800/60 border border-slate-700 rounded-2xl px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked
+                          onChange={() => {
+                            if (biCardDraft.length <= 1) return;
+                            setBiCardDraft(prev => prev.filter(x => x !== id));
+                          }}
+                        />
+                        <span className="text-xs font-bold text-white flex-1">{option.label}</span>
+                        <button onClick={() => movePivotListItem(biCardDraft, setBiCardDraft, id, 'up')} className="text-slate-400 hover:text-white"><ChevronUp size={14} /></button>
+                        <button onClick={() => movePivotListItem(biCardDraft, setBiCardDraft, id, 'down')} className="text-slate-400 hover:text-white"><ChevronDown size={14} /></button>
+                      </div>
+                    );
+                  })}
+                  {biCardDraft.length === 0 && (
+                    <div className="text-[10px] text-slate-500 px-2 py-3">至少保留一个指标卡</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">未选指标</div>
+                <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-1">
+                  {biCardOptions.filter(o => !biCardDraft.includes(o.id)).map(o => (
+                    <div key={o.id} className="flex items-center gap-3 bg-slate-900/50 border border-slate-800 rounded-2xl px-3 py-2 opacity-80 hover:opacity-100 transition">
+                      <input
+                        type="checkbox"
+                        checked={false}
+                        onChange={() => setBiCardDraft(prev => [...prev, o.id])}
+                      />
+                      <span className="text-xs font-bold text-slate-300 flex-1">{o.label}</span>
+                    </div>
+                  ))}
+                  {biCardOptions.filter(o => !biCardDraft.includes(o.id)).length === 0 && (
+                    <div className="text-[10px] text-slate-500 px-2 py-3">暂无可添加指标</div>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="mt-8 pt-6 border-t border-slate-800 flex gap-4">
+              <button onClick={() => setIsBiConfigOpen(false)} className="flex-1 py-4 font-black text-slate-400 text-xs hover:text-slate-200 transition">取消</button>
+              <button
+                onClick={() => {
+                  setBiCardOrder(biCardDraft);
+                  void saveBiConfigToCloud(biCardDraft);
+                  setIsBiConfigOpen(false);
+                }}
+                className="flex-[2] bg-indigo-600 text-white py-4 rounded-2xl font-black text-sm shadow-xl hover:bg-indigo-700 transition-all active:scale-95"
+              >
+                保存配置
+              </button>
             </div>
           </div>
         </div>

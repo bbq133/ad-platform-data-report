@@ -41,6 +41,7 @@ Content-Type: application/json
 | `platform` | String | ✅ | 广告平台 | `facebook` / `google` |
 | `filterCampaignIdList` | List\<String\> | ❌ | 筛选的Campaign ID列表 | `["camp_001","camp_002"]` |
 | `filterAccountIdList` | List\<String\> | ❌ | 筛选的广告账号ID列表 | `["acc_001","acc_002"]` |
+| `segment` | String | ❌ | 分段维度（可传多个）。传 `age_date` 时返回年龄（ageRange），传 `gender_adset_date` 时返回性别（genderType）。对应 BiSegmentEnum.AGE_DATE / GENDER_ADSET_DATE | `age_date`、`gender_adset_date` |
 
 
 ---
@@ -253,7 +254,7 @@ print(data)
 | `campaignId` | String | Campaign ID |
 | `campaignName` | String | Campaign名称 |
 | `campaignObjective` | String | Campaign目标（如：CONVERSIONS, TRAFFIC） |
-| `campaignAdvertisingType` | String | Campaign类型 |
+| `campaignAdvertisingType` | String | 广告/活动类型，用于区分 Google Pmax、Demand Gen、Search 等。已知取值：`SEARCH`（搜索）、`SHOPPING`（购物）、`DEMAND_GEN`（Demand Gen）、`VIDEO`（视频/YouTube），以及可能存在的 `PERFORMANCE_MAX`（Pmax）等，以实际接口为准 |
 | `campaignBudget` | BigDecimal | Campaign预算 |
 
 #### Adset层级
