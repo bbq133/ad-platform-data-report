@@ -116,6 +116,43 @@ export async function fetchAllPlatformsData(
  * 保持与原有 Excel/CSV 导入格式兼容
  */
 export function transformApiDataToRawData(apiData: ApiDataRow[]): Record<string, any>[] {
+    const parseExtra = (extra: unknown): Record<string, any> | null => {
+        if (!extra) return null;
+        if (typeof extra === 'object') return extra as Record<string, any>;
+        if (typeof extra !== 'string') return null;
+        try {
+            return JSON.parse(extra) as Record<string, any>;
+        } catch {
+            return null;
+        }
+    };
+
+    const getAge = (row: ApiDataRow) => {
+        const extra = parseExtra(row.extra);
+        return (
+            row.ageRange
+            || (row as any).age_range
+            || (row as any).age
+            || extra?.ageRange
+            || extra?.age_range
+            || extra?.age
+            || ''
+        );
+    };
+
+    const getGender = (row: ApiDataRow) => {
+        const extra = parseExtra(row.extra);
+        return (
+            row.genderType
+            || (row as any).gender_type
+            || (row as any).gender
+            || extra?.genderType
+            || extra?.gender_type
+            || extra?.gender
+            || ''
+        );
+    };
+
     return apiData.map(row => {
         const isGoogle = row.platform?.toLowerCase().includes('google');
         const commonData = {
@@ -158,8 +195,8 @@ export function transformApiDataToRawData(apiData: ApiDataRow[]): Record<string,
             'Total site sale value': row.gaConvertedRevenue ?? 0,
 
             // 年龄/性别（需接口传 segment=age_date、segment=gender_adset_date 才有值）
-            'Age': row.ageRange ?? '',
-            'Gender': row.genderType ?? '',
+            'Age': getAge(row),
+            'Gender': getGender(row),
 
             // 原始数据保留 (用于高级分析)
             '_raw': row

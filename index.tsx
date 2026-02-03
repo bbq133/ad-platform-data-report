@@ -325,6 +325,7 @@ const App = () => {
 
   // --- State for App ---
   const [step, setStep] = useState<'upload' | 'mapping' | 'dashboard' | 'dataSourceConfig'>('upload'); // Added dataSourceConfig step
+  const [mappingTab, setMappingTab] = useState<'metrics' | 'dimensions'>('metrics');
   const [rawData, setRawData] = useState<RawDataRow[]>([]);
   const [headersBySource, setHeadersBySource] = useState<{
     facebook: string[];
@@ -1565,7 +1566,7 @@ const App = () => {
       expandedStartD.setDate(expandedStartD.getDate() - days);
       const expandedStart = expandedStartD.toISOString().split('T')[0];
 
-      const segmentList = ['age_date', 'gender_adset_date'];
+      const segmentList = ['ad_date', 'age_date', 'gender_adset_date'];
 
       const apiData = await fetchAllPlatformsData(
         selectedProject.projectId,
@@ -1582,6 +1583,15 @@ const App = () => {
       }
 
       const transformed = transformApiDataToRawData(apiData);
+      const ageCount = transformed.filter(row => String(row['Age'] || '').trim()).length;
+      const genderCount = transformed.filter(row => String(row['Gender'] || '').trim()).length;
+      if (!ageCount || !genderCount) {
+        console.warn('Age/Gender 数据为空或缺失', {
+          ageCount,
+          genderCount,
+          sample: apiData[0]
+        });
+      }
       setRawData(transformed);
 
       if (transformed.length > 0) {
@@ -3000,12 +3010,29 @@ const App = () => {
 
               {step === 'mapping' && (
                 <div className="space-y-8 animate-in fade-in duration-700">
+                  {/* Mapping Tabs */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mr-2">配置模块</span>
+                    {[
+                      { id: 'metrics' as const, label: '指标与公式' },
+                      { id: 'dimensions' as const, label: '维度深度解析' }
+                    ].map(tab => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setMappingTab(tab.id)}
+                        className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all ${mappingTab === tab.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
 
                   {/* Top Row: Metrics & Formulas */}
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  {mappingTab === 'metrics' && (
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
 
                     {/* Left: Metric Mapping */}
-                    <div className="bg-slate-900/50 border border-slate-800 rounded-[48px] p-12 shadow-2xl space-y-12">
+                    <div className="bg-slate-900/50 border border-slate-800 rounded-[40px] p-10 shadow-2xl space-y-10">
                       <div className="flex items-center justify-between">
                         <h3 className="text-2xl font-black flex items-center gap-4 text-white"><Layers className="text-blue-400" /> 指标字段对齐</h3>
 
@@ -3033,7 +3060,7 @@ const App = () => {
                           ))}
                         </div>
                       )}
-                      <div className="grid grid-cols-1 gap-6">
+                      <div className="grid grid-cols-1 gap-4">
                         {activeHeaders.length === 0 && (
                           <div className="px-4 py-3 rounded-2xl border border-dashed border-slate-700 text-[10px] font-black text-slate-500 uppercase tracking-widest">
                             请先获取广告数据
@@ -3043,32 +3070,34 @@ const App = () => {
                           const val = (activeMapping as any)[key];
                           if (val === undefined) return null;
                           return (
-                            <div key={key} className="space-y-2 group relative">
-                              <div className="flex items-center justify-between">
-                                <label className="block text-[8px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">{getLabelForKey(key)}</label>
+                            <div key={key} className="grid grid-cols-12 items-center gap-3 group">
+                              <div className="col-span-12 md:col-span-4 flex items-center justify-between">
+                                <label className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">{getLabelForKey(key)}</label>
                                 {key.startsWith('custom_') && (
                                   <button onClick={() => handleRemoveMetric(key)} className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-red-500 transition-all p-1">
                                     <Trash2 size={10} />
                                   </button>
                                 )}
                               </div>
-                              <select className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl p-4 text-[11px] font-black outline-none text-white" value={val || ''} onChange={e => {
-                                const val = e.target.value;
-                                if (activePlatformTab === 'facebook') {
-                                  setMappings(p => ({ ...p, facebook: { ...p.facebook, [key]: val } }));
-                                } else {
-                                  setMappings(p => ({
-                                    ...p,
-                                    google: {
-                                      ...p.google,
-                                      [activeGoogleType]: { ...p.google[activeGoogleType], [key]: val }
-                                    }
-                                  }));
-                                }
-                              }}>
-                                <option value="">未选择 (Unmapped)</option>
-                                {activeHeaders.map(h => <option key={h} value={h}>{h}</option>)}
-                              </select>
+                              <div className="col-span-12 md:col-span-8 min-w-0">
+                                <select className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl px-4 py-3 text-[11px] font-black outline-none text-white" value={val || ''} onChange={e => {
+                                  const val = e.target.value;
+                                  if (activePlatformTab === 'facebook') {
+                                    setMappings(p => ({ ...p, facebook: { ...p.facebook, [key]: val } }));
+                                  } else {
+                                    setMappings(p => ({
+                                      ...p,
+                                      google: {
+                                        ...p.google,
+                                        [activeGoogleType]: { ...p.google[activeGoogleType], [key]: val }
+                                      }
+                                    }));
+                                  }
+                                }}>
+                                  <option value="">未选择 (Unmapped)</option>
+                                  {activeHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                                </select>
+                              </div>
                             </div>
                           );
                         })}
@@ -3080,7 +3109,7 @@ const App = () => {
                             <div className="flex items-center gap-2">
                               <input
                                 autoFocus
-                                className="flex-1 bg-slate-900 border-2 border-indigo-400 rounded-2xl p-3 text-[11px] font-black outline-none shadow-lg text-white"
+                                className="flex-1 min-w-0 bg-slate-900 border-2 border-indigo-400 rounded-2xl p-3 text-[11px] font-black outline-none shadow-lg text-white"
                                 placeholder="输入指标名称..."
                                 value={newMetricName}
                                 onChange={e => setNewMetricName(e.target.value)}
@@ -3109,12 +3138,12 @@ const App = () => {
                     </div>
 
                     {/* Right: Formula Config */}
-                    <div className="bg-slate-900/50 border border-slate-800 rounded-[48px] p-12 shadow-2xl space-y-8 flex flex-col">
+                    <div className="bg-slate-900/50 border border-slate-800 rounded-[40px] p-10 shadow-2xl space-y-8 flex flex-col">
                       <div className="flex items-center justify-between">
                         <h3 className="text-xl font-black flex items-center gap-4 text-white"><Calculator className="text-indigo-400" /> 公式字段配置</h3>
                         <button className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-[10px] font-black hover:bg-indigo-700 transition" onClick={() => openFormulaModal()}>+ 新增公式</button>
                       </div>
-                      <div className="grid grid-cols-1 gap-4 flex-1 content-start">
+                      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 flex-1 content-start">
                         {formulas.map(f => (
                           <div key={f.id} className="p-6 bg-slate-800 rounded-3xl border border-slate-700 flex items-center justify-between group">
                             <div>
@@ -3136,9 +3165,11 @@ const App = () => {
                       </div>
                     </div>
                   </div>
+                  )}
 
                   {/* Bottom Row: Dimensions */}
-                  <div className="bg-slate-900/50 border border-slate-800 rounded-[48px] p-12 shadow-2xl space-y-12">
+                  {mappingTab === 'dimensions' && (
+                  <div className="bg-slate-900/50 border border-slate-800 rounded-[40px] p-10 shadow-2xl space-y-10">
                     <div className="flex items-center justify-between">
                       <h3 className="text-2xl font-black flex items-center gap-4 text-white"><Split className="text-purple-400" /> 维度深度解析</h3>
                     </div>
@@ -3164,7 +3195,7 @@ const App = () => {
                       </div>
 
                       {/* Right Side: Dimension Rules */}
-                      <div className="lg:col-span-2 space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                      <div className="lg:col-span-2 space-y-4 max-h-[520px] overflow-y-auto overflow-x-hidden pr-2 custom-scrollbar">
                         {allDimensions.map(dim => {
                           const existing = dimConfigs.find(d => d.label === dim);
                           const currentSource = existing?.source || 'campaign';
@@ -3173,14 +3204,14 @@ const App = () => {
                           const sampleParts = sampleStr ? sampleStr.split(currentDelimiter) : [];
                           return (
                             <div key={dim} className="flex flex-col md:flex-row md:items-center gap-4 p-5 bg-slate-800 rounded-3xl border border-slate-700 shadow-sm group hover:border-purple-700 transition-all relative">
-                              <div className="md:w-32 flex items-center justify-between shrink-0">
+                              <div className="md:w-40 flex items-center justify-between shrink-0">
                                 <span className="text-[11px] font-black text-slate-200 uppercase tracking-widest">{dim}</span>
                                 <button onClick={() => handleRemoveDimension(dim)} className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-red-500 transition-all p-1 mr-2">
                                   <Trash2 size={12} />
                                 </button>
                               </div>
-                              <div className="flex flex-1 gap-3">
-                                <select className="flex-[3] bg-slate-900 text-[11px] font-black px-5 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.source || ''} onChange={e => {
+                              <div className="grid grid-cols-12 gap-3 flex-1 w-full">
+                                <select className="col-span-12 lg:col-span-5 min-w-0 bg-slate-900 text-[11px] font-black px-5 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.source || ''} onChange={e => {
                                   const source = e.target.value as any;
                                   if (source) setDimConfigs(p => [...p.filter(x => x.label !== dim), { label: dim, source, index: existing?.index || 0 }]);
                                 }}>
@@ -3193,10 +3224,10 @@ const App = () => {
                                   <option value="platform">Platform</option>
                                 </select>
                                 {(currentSource === 'age' || currentSource === 'gender') ? (
-                                  <span className="flex-[1] min-w-[80px] flex items-center justify-center px-3 py-4 rounded-2xl bg-slate-800/60 border border-slate-700 text-[10px] font-black text-slate-400 uppercase tracking-widest">直接取值</span>
+                                  <span className="col-span-12 lg:col-span-7 min-w-0 flex items-center justify-center px-3 py-4 rounded-2xl bg-slate-800/60 border border-slate-700 text-[10px] font-black text-slate-400 uppercase tracking-widest">直接取值</span>
                                 ) : (
                                   <>
-                                    <select className="flex-[1] min-w-[80px] bg-slate-900 text-[11px] font-black px-3 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-center text-white" value={existing?.delimiter || '_'} onChange={e => {
+                                    <select className="col-span-6 lg:col-span-3 min-w-0 bg-slate-900 text-[11px] font-black px-3 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-center text-white" value={existing?.delimiter || '_'} onChange={e => {
                                       const delimiter = e.target.value;
                                       if (existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, delimiter }]);
                                       else setDimConfigs(p => [...p, { label: dim, source: 'campaign', index: 0, delimiter }]);
@@ -3204,7 +3235,7 @@ const App = () => {
                                       <option value="_">_ (下划线 | Underscore)</option>
                                       <option value="-">- (中划线 | Hyphen)</option>
                                     </select>
-                                    <select className="flex-[2] min-w-[140px] bg-slate-900 text-[11px] font-black px-5 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.index ?? ''} onChange={e => {
+                                    <select className="col-span-6 lg:col-span-4 min-w-0 bg-slate-900 text-[11px] font-black px-5 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.index ?? ''} onChange={e => {
                                       const index = parseInt(e.target.value);
                                       if (!isNaN(index) && existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, index }]);
                                       else if (!isNaN(index)) setDimConfigs(p => [...p, { label: dim, source: 'campaign', index, delimiter: '_' }]);
@@ -3260,6 +3291,7 @@ const App = () => {
                     </div>
 
                   </div>
+                  )}
                 </div>
               )}
 
