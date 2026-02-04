@@ -47,7 +47,10 @@ import {
   Settings as SettingsIcon,
   GripVertical,
   LogOut,
-  Save
+  Save,
+  AlertTriangle,
+  CheckSquare,
+  HelpCircle
 } from 'lucide-react';
 import {
   XAxis,
@@ -325,7 +328,7 @@ const App = () => {
 
   // --- State for App ---
   const [step, setStep] = useState<'upload' | 'mapping' | 'dashboard' | 'dataSourceConfig'>('upload'); // Added dataSourceConfig step
-  const [mappingTab, setMappingTab] = useState<'metrics' | 'dimensions'>('metrics');
+  const [mappingTab, setMappingTab] = useState<'metrics' | 'dimensions' | 'quality'>('metrics');
   const [rawData, setRawData] = useState<RawDataRow[]>([]);
   const [headersBySource, setHeadersBySource] = useState<{
     facebook: string[];
@@ -563,6 +566,13 @@ const App = () => {
   // --- New Dashboard Features States ---
   const [newDimensionName, setNewDimensionName] = useState('');
   const [isAddingDimension, setIsAddingDimension] = useState(false);
+  
+  // Data Quality Report States
+  const [selectedQualityDimension, setSelectedQualityDimension] = useState<string>('');
+  const [qualitySearchTerm, setQualitySearchTerm] = useState<string>('');
+  const [qualityPlatformFilter, setQualityPlatformFilter] = useState<'all' | 'facebook' | 'google'>('all');
+  const [qualitySort, setQualitySort] = useState<'cost_desc' | 'date_desc'>('cost_desc');
+  const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
   const [isFieldConfigOpen, setIsFieldConfigOpen] = useState(false);
   const [fieldSearchTerm, setFieldSearchTerm] = useState('');
   const [activeTableMetrics, setActiveTableMetrics] = useState<string[]>(['cost', 'leads', 'CPM', 'CTR', 'linkClicks']);
@@ -603,6 +613,10 @@ const App = () => {
   const [pivotPresetNameInput, setPivotPresetNameInput] = useState('');
   const [isSavePivotModalOpen, setIsSavePivotModalOpen] = useState(false);
   const [isPivotPresetDropdownOpen, setIsPivotPresetDropdownOpen] = useState(false);
+  /** 当前选中的已保存报告 id，用于显示「当前报告」并启用「更新当前报告设置」 */
+  const [activePivotPresetId, setActivePivotPresetId] = useState<string | null>(null);
+  /** 更新当前报告设置完成后的弱提示 */
+  const [pivotUpdateHintVisible, setPivotUpdateHintVisible] = useState(false);
 
   const dashboardRef = useRef<HTMLDivElement>(null);
   const metricDropdownRef = useRef<HTMLDivElement>(null);
@@ -990,6 +1004,11 @@ const App = () => {
         _platform: platformValue,
         _googleType: googleType,
         _dims: dims,
+        _names: {
+          campaign: String(row[curMap.campaign] || ''),
+          adSet: String(row[curMap.adSet] || ''),
+          ad: String(row[curMap.ad] || '')
+        },
         _metrics: { ...context, ...formulaResults },
       };
     });
@@ -1030,6 +1049,109 @@ const App = () => {
 
     return data;
   }, [baseProcessedData, dateRange, dashboardPlatformFilter, dimFilters]);
+
+  // --- Data Quality Report Logic ---
+  // 暂时忽略性别和年龄维度的分析
+  const qualityDimensionLabels = useMemo(() => 
+    dimConfigs
+      .filter(d => d.source !== 'age' && d.source !== 'gender')
+      .map(d => d.label), 
+    [dimConfigs]
+  );
+
+  // Auto-select first dimension when configs change
+  useEffect(() => {
+    if (qualityDimensionLabels.length > 0 && !selectedQualityDimension) {
+      setSelectedQualityDimension(qualityDimensionLabels[0]);
+    }
+    if (!qualityDimensionLabels.includes(selectedQualityDimension)) {
+      setSelectedQualityDimension(qualityDimensionLabels[0] || '');
+    }
+  }, [qualityDimensionLabels, selectedQualityDimension]);
+
+  // Overall quality stats
+  const qualityStats = useMemo(() => {
+    const total = baseProcessedData.length;
+    if (!total || qualityDimensionLabels.length === 0) {
+      return { total, matched: 0, unmatched: 0, matchRate: 0 };
+    }
+    let unmatched = 0;
+    baseProcessedData.forEach(row => {
+      const hasMissing = qualityDimensionLabels.some(label => (row._dims[label] || 'N/A') === 'N/A');
+      if (hasMissing) unmatched += 1;
+    });
+    const matched = total - unmatched;
+    const matchRate = total ? matched / total : 0;
+    return { total, matched, unmatched, matchRate };
+  }, [baseProcessedData, qualityDimensionLabels]);
+
+  // Per-dimension match stats for left sidebar
+  const dimensionMatchStats = useMemo(() => {
+    if (qualityDimensionLabels.length === 0 || baseProcessedData.length === 0) return [];
+    
+    return qualityDimensionLabels.map(dimLabel => {
+      let missing = 0;
+      baseProcessedData.forEach(row => {
+        if ((row._dims[dimLabel] || 'N/A') === 'N/A') {
+          missing += 1;
+        }
+      });
+      const total = baseProcessedData.length;
+      const matched = total - missing;
+      const matchRate = total ? matched / total : 0;
+      
+      return {
+        label: dimLabel,
+        total,
+        matched,
+        missing,
+        matchRate
+      };
+    }).sort((a, b) => a.matchRate - b.matchRate); // Sort by match rate ascending (worst first)
+  }, [baseProcessedData, qualityDimensionLabels]);
+
+  // Unmatched data list for selected dimension
+  const qualityUnmatchedData = useMemo(() => {
+    if (!selectedQualityDimension || baseProcessedData.length === 0) return [];
+    
+    const issues = baseProcessedData
+      .filter(row => (row._dims[selectedQualityDimension] || 'N/A') === 'N/A')
+      .map(row => ({
+        row,
+        campaignName: row._names?.campaign || 'N/A',
+        date: row._date || 'N/A',
+        platform: row._platform === 'google' ? `Google (${row._googleType || 'PERFORMANCE_MAX'})` : 'Meta',
+        cost: Number(row._metrics?.cost || 0)
+      }));
+
+    return issues;
+  }, [baseProcessedData, selectedQualityDimension]);
+
+  // Filtered and sorted unmatched data
+  const filteredQualityData = useMemo(() => {
+    let list = qualityUnmatchedData;
+    
+    // Platform filter
+    if (qualityPlatformFilter !== 'all') {
+      list = list.filter(item => item.row._platform === qualityPlatformFilter);
+    }
+    
+    // Search filter
+    if (qualitySearchTerm.trim()) {
+      const term = qualitySearchTerm.toLowerCase();
+      list = list.filter(item => item.campaignName.toLowerCase().includes(term));
+    }
+    
+    // Sort
+    const sorted = [...list].sort((a, b) => {
+      if (qualitySort === 'date_desc') {
+        return String(b.date).localeCompare(String(a.date));
+      }
+      return b.cost - a.cost; // cost_desc
+    });
+    
+    return sorted;
+  }, [qualityUnmatchedData, qualityPlatformFilter, qualitySearchTerm, qualitySort]);
 
   // 上期数据：与 dateRange 等长、紧挨着的前一段，用于 BI 看板环比
   const lastPeriodFilteredData = useMemo(() => {
@@ -1438,7 +1560,7 @@ const App = () => {
     };
 
     const buildBaseMapping = (hdrs: string[], existing: MappingConfig) => ({
-      campaign: pick(hdrs, ['campaign name', 'campaign'], existing.campaign),
+      campaign: pick(hdrs, ['campaign name'], existing.campaign),
       adSet: pick(hdrs, ['ad set name', 'adset'], existing.adSet),
       ad: pick(hdrs, ['ad name', 'creative'], existing.ad),
       age: pick(hdrs, ['age'], existing.age),
@@ -1566,7 +1688,7 @@ const App = () => {
       expandedStartD.setDate(expandedStartD.getDate() - days);
       const expandedStart = expandedStartD.toISOString().split('T')[0];
 
-      const segmentList = ['ad_date', 'age_date', 'gender_adset_date'];
+      const segmentList = ['age_date', 'gender_adset_date'];
 
       const apiData = await fetchAllPlatformsData(
         selectedProject.projectId,
@@ -1802,6 +1924,7 @@ const App = () => {
       persistPivotPresets(next);
       return next;
     });
+    setActivePivotPresetId(preset.id);
     setPivotPresetNameInput('');
     setIsSavePivotModalOpen(false);
   };
@@ -1834,10 +1957,44 @@ const App = () => {
     setPivotValues(filteredVals.length ? filteredVals : preset.values);
     setPivotDisplay({ ...preset.display });
     setIsPivotPresetDropdownOpen(false);
+    setActivePivotPresetId(preset.id);
+  };
+
+  /** 用当前透视配置覆盖指定 id 的已保存报告 */
+  const handleUpdatePivotPreset = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation?.();
+    const preset = pivotPresets.find(p => p.id === id);
+    if (!preset) return;
+    const updated: PivotPreset = {
+      id: preset.id,
+      name: preset.name,
+      filters: pivotFilters.map(f => ({
+        fieldKey: f.fieldKey,
+        label: f.label,
+        mode: f.mode,
+        selectedValues: f.selectedValues,
+        textValue: f.textValue,
+        dateRange: f.dateRange,
+      })),
+      rows: [...pivotRows],
+      columns: [...pivotColumns],
+      values: [...pivotValues],
+      display: { ...pivotDisplay },
+      platformScopes: [...pivotPlatformScopes],
+    };
+    setPivotPresets(prev => {
+      const next = prev.map(p => (p.id === id ? updated : p));
+      persistPivotPresets(next);
+      return next;
+    });
+    setIsPivotPresetDropdownOpen(false);
+    setPivotUpdateHintVisible(true);
+    window.setTimeout(() => setPivotUpdateHintVisible(false), 2500);
   };
 
   const handleRemovePivotPreset = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (id === activePivotPresetId) setActivePivotPresetId(null);
     setPivotPresets(prev => {
       const next = prev.filter(p => p.id !== id);
       persistPivotPresets(next);
@@ -2172,7 +2329,7 @@ const App = () => {
             <p className="text-slate-400 text-[11px] font-black uppercase tracking-[0.2em]">Pivot · Rows / Columns / Values / Filters</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={() => setIsSavePivotModalOpen(true)} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition">保存为报告</button>
+            <button onClick={() => setIsSavePivotModalOpen(true)} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition">【保存为新的报告】</button>
             <div className="relative" ref={pivotPresetDropdownRef}>
               <button
                 onClick={() => setIsPivotPresetDropdownOpen(v => !v)}
@@ -2211,6 +2368,15 @@ const App = () => {
                 </div>
               )}
             </div>
+            {activePivotPresetId && (
+              <button
+                onClick={() => handleUpdatePivotPreset(activePivotPresetId)}
+                className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-500 transition flex items-center gap-2"
+                title="将当前字段配置保存到当前报告"
+              >
+                【更新当前报告设置】
+              </button>
+            )}
             <button onClick={copyPivotToClipboard} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition">复制表格</button>
             <div className="relative" ref={pivotExportRef}>
               <button
@@ -2232,6 +2398,11 @@ const App = () => {
             </button>
           </div>
         </div>
+        {pivotUpdateHintVisible && (
+          <p className="text-[11px] text-emerald-400/90 mt-1 mb-2 animate-in fade-in duration-200" role="status">
+            已更新当前报告设置
+          </p>
+        )}
 
         <div className={`grid gap-6 ${isPivotDrawerOpen ? 'lg:grid-cols-[1fr_360px]' : 'grid-cols-1'}`}>
           <div className="min-w-0">
@@ -2652,7 +2823,7 @@ const App = () => {
                 className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl text-xs font-black transition-all shadow-lg shadow-indigo-500/20 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed mr-2"
               >
                 {isLoadingData ? <RefreshCcw className="animate-spin" size={14} /> : <Save size={14} />}
-                {isLoadingData ? 'Saving...' : '保存配置'}
+                {isLoadingData ? '保存中...' : '【保存指标与维度参数配置】'}
               </button>
             )}
             {/* User Profile & Logout */}
@@ -2782,6 +2953,16 @@ const App = () => {
                     <div>
                       <h2 className="text-xl font-bold text-white">{selectedProject.projectName}</h2>
                       <p className="text-slate-400 text-xs mt-0.5">Growth Scientist Analysis Report</p>
+                      {activeReportTab === 'pivot' && (
+                        <p className="text-slate-500 text-[11px] mt-1.5 flex items-center gap-1.5">
+                          <span>当前报告：</span>
+                          <span className={activePivotPresetId ? 'text-indigo-400 font-semibold' : 'text-slate-500'}>
+                            {activePivotPresetId
+                              ? (pivotPresets.find(p => p.id === activePivotPresetId)?.name ?? '未知')
+                              : '未选择'}
+                          </span>
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -3010,21 +3191,59 @@ const App = () => {
 
               {step === 'mapping' && (
                 <div className="space-y-8 animate-in fade-in duration-700">
-                  {/* Mapping Tabs */}
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mr-2">配置模块</span>
-                    {[
-                      { id: 'metrics' as const, label: '指标与公式' },
-                      { id: 'dimensions' as const, label: '维度深度解析' }
-                    ].map(tab => (
-                      <button
-                        key={tab.id}
-                        onClick={() => setMappingTab(tab.id)}
-                        className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all ${mappingTab === tab.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}
-                      >
-                        {tab.label}
-                      </button>
-                    ))}
+                  {/* Mapping Tabs + 红框操作区（与 tab 栏齐平） */}
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mr-2">配置模块</span>
+                      {[
+                        { id: 'metrics' as const, label: '指标与公式' },
+                        { id: 'dimensions' as const, label: '维度深度解析' },
+                        { id: 'quality' as const, label: '数据质量报告' }
+                      ].map(tab => (
+                        <button
+                          key={tab.id}
+                          onClick={() => setMappingTab(tab.id)}
+                          className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all ${mappingTab === tab.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+                    {/* 红框区域：按当前 tab 显示操作按钮 */}
+                    <div className="flex items-center gap-2">
+                      {mappingTab === 'metrics' && (
+                        <button
+                          onClick={() => setMappingTab('dimensions')}
+                          className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-500 transition-all shrink-0"
+                        >
+                          下一步进入到维度深度解析
+                        </button>
+                      )}
+                      {mappingTab === 'dimensions' && (
+                        <>
+                          <button
+                            onClick={() => setMappingTab('metrics')}
+                            className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-black hover:bg-slate-700 transition-all shrink-0"
+                          >
+                            返回上一步
+                          </button>
+                          <button
+                            onClick={() => setStep('dashboard')}
+                            className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-500 transition-all shrink-0"
+                          >
+                            生成智投分析面板
+                          </button>
+                        </>
+                      )}
+                      {mappingTab === 'quality' && (
+                        <button
+                          onClick={() => setStep('dashboard')}
+                          className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-500 transition-all shrink-0"
+                        >
+                          生成智投分析面板
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* Top Row: Metrics & Formulas */}
@@ -3170,14 +3389,48 @@ const App = () => {
                   {/* Bottom Row: Dimensions */}
                   {mappingTab === 'dimensions' && (
                   <div className="bg-slate-900/50 border border-slate-800 rounded-[40px] p-10 shadow-2xl space-y-10">
-                    <div className="flex items-center justify-between">
+                    <div>
                       <h3 className="text-2xl font-black flex items-center gap-4 text-white"><Split className="text-purple-400" /> 维度深度解析</h3>
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                       {/* Left Side: Samples */}
                       <div className="lg:col-span-1 bg-slate-800 rounded-3xl p-6 space-y-6 border border-slate-700 shadow-inner h-fit">
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2"><TableIcon size={12} /> NAMING CONVENTION SAMPLES</p>
+                        <div className="flex items-center justify-between">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2"><TableIcon size={12} /> NAMING CONVENTION SAMPLES</p>
+                        </div>
+                        
+                        {/* Platform Selector */}
+                        <div className="flex bg-slate-900 p-1 rounded-xl">
+                          {['facebook', 'google'].map(p => (
+                            <button 
+                              key={p} 
+                              onClick={() => setActivePlatformTab(p as any)} 
+                              className={`flex-1 px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${activePlatformTab === p ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
+                            >
+                              {p === 'facebook' ? 'Meta' : 'Google'}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Google Type Selector */}
+                        {activePlatformTab === 'google' && (
+                          <div className="space-y-2">
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Google Ad Type</p>
+                            <div className="flex flex-col gap-1.5">
+                              {GOOGLE_TYPES.map(t => (
+                                <button
+                                  key={t}
+                                  onClick={() => setActiveGoogleType(t)}
+                                  className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all text-left ${activeGoogleType === t ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 bg-slate-900 hover:text-slate-200 hover:bg-slate-900/70'}`}
+                                >
+                                  {t.replace('_', ' ')}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         <div className="space-y-4">
                           <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
                             <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Campaign Name Sample</label>
@@ -3285,11 +3538,188 @@ const App = () => {
                       </div>
                     </div>
 
-                    <div className="pt-8 border-t border-slate-800 flex gap-4">
-                      <button onClick={() => setStep('dataSourceConfig')} className="bg-slate-800 text-slate-400 px-8 py-4 rounded-[24px] text-xs font-black">返回上一步</button>
-                      <button onClick={() => setStep('dashboard')} className="flex-1 bg-indigo-600 text-white py-4 rounded-[24px] text-xs font-black shadow-xl hover:bg-indigo-700 transition-all">生成智投分析面板</button>
+                  </div>
+                  )}
+
+                  {/* Data Quality Report */}
+                  {mappingTab === 'quality' && (
+                  <div className="space-y-8">
+                    {/* Top Stats */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">总数据量</p>
+                        <p className="text-3xl font-black text-white mt-3">{qualityStats.total.toLocaleString()}</p>
+                      </div>
+                      <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">匹配成功</p>
+                        <p className="text-3xl font-black text-emerald-400 mt-3">{qualityStats.matched.toLocaleString()}</p>
+                        <p className="text-[11px] font-black text-emerald-300/80 mt-2">{(qualityStats.matchRate * 100).toFixed(1)}%</p>
+                      </div>
+                      <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">匹配失败</p>
+                        <p className="text-3xl font-black text-amber-400 mt-3">{qualityStats.unmatched.toLocaleString()}</p>
+                        <p className="text-[11px] font-black text-amber-300/80 mt-2">{((1 - qualityStats.matchRate) * 100).toFixed(1)}%</p>
+                      </div>
                     </div>
 
+                    {/* Overall Progress Bar */}
+                    <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6">
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">整体匹配率</p>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-black text-slate-300">{(qualityStats.matchRate * 100).toFixed(1)}%</span>
+                          <button
+                            onClick={() => setIsRulesModalOpen(true)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-[10px] font-bold text-slate-300 hover:text-white transition-all"
+                            title="查看匹配规则说明"
+                          >
+                            <HelpCircle size={12} />
+                            规则说明
+                          </button>
+                        </div>
+                      </div>
+                      <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
+                        <div 
+                          className={`h-full transition-all duration-500 ${qualityStats.matchRate >= 0.95 ? 'bg-emerald-500' : qualityStats.matchRate >= 0.8 ? 'bg-yellow-500' : 'bg-red-500'}`} 
+                          style={{ width: `${Math.round(qualityStats.matchRate * 100)}%` }} 
+                        />
+                      </div>
+                    </div>
+
+                    {/* Main Content: Left Sidebar + Right Details */}
+                    {baseProcessedData.length === 0 && (
+                      <div className="bg-slate-800/60 border border-slate-700 rounded-3xl p-8 text-center text-slate-400 text-sm font-bold">
+                        暂无数据，请先获取广告数据
+                      </div>
+                    )}
+
+                    {baseProcessedData.length > 0 && qualityDimensionLabels.length === 0 && (
+                      <div className="bg-slate-800/60 border border-slate-700 rounded-3xl p-8 text-center text-slate-400 text-sm font-bold">
+                        暂未配置维度，请先在"维度深度解析"中设置规则
+                      </div>
+                    )}
+
+                    {baseProcessedData.length > 0 && qualityDimensionLabels.length > 0 && (
+                      <div className="flex gap-6 h-[600px]">
+                        {/* Left Sidebar: Dimension List */}
+                        <div className="w-60 flex-shrink-0 bg-slate-900/50 border border-slate-800 rounded-3xl flex flex-col overflow-hidden">
+                          <div className="p-4 border-b border-slate-800">
+                            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                              <Target size={12} className="text-purple-400" /> 维度列表
+                            </h4>
+                          </div>
+                          <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
+                            {dimensionMatchStats.map(stat => {
+                              const isSelected = selectedQualityDimension === stat.label;
+                              const colorClass = stat.matchRate >= 0.95 ? 'text-emerald-400' : stat.matchRate >= 0.8 ? 'text-yellow-400' : 'text-red-400';
+                              const bgClass = stat.matchRate >= 0.95 ? 'bg-emerald-500/10' : stat.matchRate >= 0.8 ? 'bg-yellow-500/10' : 'bg-red-500/10';
+                              
+                              return (
+                                <button
+                                  key={stat.label}
+                                  onClick={() => setSelectedQualityDimension(stat.label)}
+                                  className={`w-full p-3 rounded-2xl text-left transition-all ${
+                                    isSelected 
+                                      ? 'bg-indigo-600 text-white shadow-lg' 
+                                      : `${bgClass} text-slate-300 hover:bg-slate-800`
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-[11px] font-black">{stat.label}</span>
+                                    {stat.matchRate < 0.8 && !isSelected && (
+                                      <AlertTriangle size={12} className="text-red-400" />
+                                    )}
+                                  </div>
+                                  <div className={`text-xl font-black ${isSelected ? 'text-white' : colorClass}`}>
+                                    {(stat.matchRate * 100).toFixed(1)}%
+                                  </div>
+                                  <div className={`text-[10px] font-bold mt-1 ${isSelected ? 'text-indigo-200' : 'text-slate-500'}`}>
+                                    {stat.missing.toLocaleString()} 条缺失
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Right: Details for Selected Dimension */}
+                        <div className="flex-1 bg-slate-900/50 border border-slate-800 rounded-3xl flex flex-col overflow-hidden">
+                          {/* Header */}
+                          <div className="p-4 border-b border-slate-800">
+                            <div className="flex flex-col md:flex-row md:items-center gap-4">
+                              <div className="flex-1 relative">
+                                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                                <input
+                                  type="text"
+                                  placeholder="搜索 Campaign Name..."
+                                  className="w-full pl-9 pr-4 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                                  value={qualitySearchTerm}
+                                  onChange={e => setQualitySearchTerm(e.target.value)}
+                                />
+                              </div>
+                              <select 
+                                className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                value={qualityPlatformFilter}
+                                onChange={e => setQualityPlatformFilter(e.target.value as any)}
+                              >
+                                <option value="all">全部平台</option>
+                                <option value="facebook">Meta</option>
+                                <option value="google">Google</option>
+                              </select>
+                              <select 
+                                className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                value={qualitySort}
+                                onChange={e => setQualitySort(e.target.value as any)}
+                              >
+                                <option value="cost_desc">按花费降序</option>
+                                <option value="date_desc">按日期降序</option>
+                              </select>
+                            </div>
+                            <div className="mt-3 flex items-center justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                              <span>未匹配数据 · {selectedQualityDimension}</span>
+                              <span>{filteredQualityData.length.toLocaleString()} 条</span>
+                            </div>
+                          </div>
+
+                          {/* List */}
+                          <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                            {filteredQualityData.length === 0 && (
+                              <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                                <CheckSquare className="w-12 h-12 mb-2 opacity-20" />
+                                <p className="text-sm font-medium">暂无未匹配数据</p>
+                              </div>
+                            )}
+
+                            {filteredQualityData.slice(0, 100).map((item, idx) => (
+                              <div 
+                                key={`${item.date}_${idx}`} 
+                                className="bg-slate-800/70 border border-slate-700 rounded-2xl p-4 hover:border-slate-600 transition-all"
+                              >
+                                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                                  <div className="space-y-1 min-w-0 flex-1">
+                                    <p className="text-xs font-black text-white truncate" title={item.campaignName}>
+                                      {item.campaignName}
+                                    </p>
+                                    <div className="text-[11px] font-bold text-slate-400">
+                                      {item.platform} · {item.date} · 花费 ${item.cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </div>
+                                    <div className="text-[11px] font-black text-amber-300">
+                                      缺失维度：{selectedQualityDimension}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+
+                            {filteredQualityData.length > 100 && (
+                              <div className="text-center text-[10px] font-black text-slate-500 uppercase tracking-widest py-4">
+                                仅展示前 100 条，请使用搜索和筛选功能
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   )}
                 </div>
@@ -3383,12 +3813,137 @@ const App = () => {
         </div>
       )}
 
+      {/* Rules Explanation Modal */}
+      {isRulesModalOpen && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 w-full max-w-2xl rounded-[32px] shadow-2xl p-8 animate-in fade-in zoom-in duration-300 border border-slate-800 max-h-[80vh] overflow-y-auto custom-scrollbar">
+            <div className="flex items-center justify-between mb-6">
+              <h4 className="text-xl font-black text-white flex items-center gap-3">
+                <HelpCircle className="text-indigo-400" size={24} />
+                匹配规则说明
+              </h4>
+              <button onClick={() => setIsRulesModalOpen(false)} className="p-2 hover:bg-slate-800 rounded-full transition text-slate-400">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Intro */}
+              <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-5">
+                <p className="text-sm text-slate-300 leading-relaxed">
+                  系统通过分隔符（<span className="font-black text-indigo-400">下划线 _</span> 或 <span className="font-black text-indigo-400">中划线 -</span>）和索引位置来解析 Campaign/Ad Set/Ad 名称中的维度信息。
+                </p>
+              </div>
+
+              {/* Current Rules */}
+              {dimConfigs.length > 0 && (
+                <div>
+                  <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">当前配置的维度规则</h5>
+                  <div className="space-y-3">
+                    {dimConfigs.map((conf, idx) => (
+                      <div key={idx} className="bg-slate-800/70 border border-slate-700 rounded-2xl p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-black text-white">{conf.label}</span>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase bg-slate-900 px-2 py-1 rounded">
+                            {conf.source === 'platform' ? '平台' : conf.source === 'age' ? '年龄' : conf.source === 'gender' ? '性别' : conf.source.toUpperCase()}
+                          </span>
+                        </div>
+                        {conf.source !== 'platform' && conf.source !== 'age' && conf.source !== 'gender' && (
+                          <div className="flex items-center gap-4 text-xs text-slate-400">
+                            <span>分隔符: <span className="font-mono text-indigo-300">{conf.delimiter || '_'}</span></span>
+                            <span>索引位置: <span className="font-mono text-indigo-300">{conf.index}</span></span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Example */}
+              {namingSamples.campaign && (
+                <div>
+                  <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">解析示例</h5>
+                  <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-4">
+                    <div>
+                      <p className="text-[10px] font-black text-slate-500 uppercase mb-2">Campaign Name 示例</p>
+                      <p className="text-sm font-mono text-emerald-400 break-all">{namingSamples.campaign}</p>
+                    </div>
+                    
+                    {dimConfigs.filter(c => c.source === 'campaign' && c.source !== 'platform' && c.source !== 'age' && c.source !== 'gender').length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-black text-slate-500 uppercase">解析结果</p>
+                        {(() => {
+                          const parts = namingSamples.campaign.split(dimConfigs.find(c => c.source === 'campaign')?.delimiter || '_');
+                          return dimConfigs
+                            .filter(c => c.source === 'campaign')
+                            .map((conf, idx) => {
+                              const value = parts[conf.index] || 'N/A';
+                              const isValid = value !== 'N/A' && value !== '';
+                              return (
+                                <div key={idx} className="flex items-center gap-3">
+                                  <span className="text-xs font-mono text-slate-400">索引 {conf.index}</span>
+                                  <ArrowRight size={12} className="text-slate-600" />
+                                  <span className="text-xs font-bold text-slate-300">{conf.label}:</span>
+                                  <span className={`text-xs font-mono ${isValid ? 'text-emerald-400' : 'text-red-400'}`}>
+                                    {value}
+                                  </span>
+                                  {isValid ? (
+                                    <Check size={12} className="text-emerald-400" />
+                                  ) : (
+                                    <X size={12} className="text-red-400" />
+                                  )}
+                                </div>
+                              );
+                            });
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Tips */}
+              <div className="bg-indigo-900/20 border border-indigo-700/30 rounded-2xl p-5">
+                <h5 className="text-xs font-black text-indigo-300 uppercase mb-3 flex items-center gap-2">
+                  <Lightbulb size={14} />
+                  优化建议
+                </h5>
+                <ul className="space-y-2 text-xs text-slate-300">
+                  <li className="flex items-start gap-2">
+                    <span className="text-indigo-400 mt-0.5">•</span>
+                    <span>确保 Campaign/Ad 命名遵循统一的分隔符规则（建议全部使用下划线或中划线）</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-indigo-400 mt-0.5">•</span>
+                    <span>维度信息应放在固定的索引位置，避免随意变动结构</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-indigo-400 mt-0.5">•</span>
+                    <span>若发现大量未匹配数据，请在"维度深度解析"标签页调整分隔符或索引配置</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="mt-6 pt-6 border-t border-slate-800">
+              <button 
+                onClick={() => setIsRulesModalOpen(false)}
+                className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black text-sm shadow-xl hover:bg-indigo-700 transition-all active:scale-95"
+              >
+                知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 保存透视报告弹窗 */}
       {isSavePivotModalOpen && (
         <div className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 w-full max-w-md rounded-[32px] shadow-2xl p-8 animate-in fade-in zoom-in duration-300 border border-slate-800">
             <div className="flex items-center justify-between mb-6">
-              <h4 className="text-xl font-black text-white">保存为报告</h4>
+              <h4 className="text-xl font-black text-white">保存为新的报告</h4>
               <button onClick={() => { setIsSavePivotModalOpen(false); setPivotPresetNameInput(''); }} className="p-2 hover:bg-slate-800 rounded-full transition text-slate-400"><X size={20} /></button>
             </div>
             <div className="mb-6">
