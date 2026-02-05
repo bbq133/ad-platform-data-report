@@ -2332,15 +2332,18 @@ const App = () => {
             <button onClick={() => setIsSavePivotModalOpen(true)} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition">【保存为新的报告】</button>
             <div className="relative" ref={pivotPresetDropdownRef}>
               <button
+                type="button"
                 onClick={() => setIsPivotPresetDropdownOpen(v => !v)}
                 className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition flex items-center gap-2"
+                aria-expanded={isPivotPresetDropdownOpen}
+                aria-haspopup="listbox"
               >
                 已保存报告
                 {pivotPresets.length > 0 && <span className="bg-indigo-600 text-white text-[10px] px-1.5 py-0.5 rounded-full">{pivotPresets.length}</span>}
                 <ChevronDown size={12} className={`transition-transform ${isPivotPresetDropdownOpen ? 'rotate-180' : ''}`} />
               </button>
               {isPivotPresetDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-800 rounded-xl shadow-xl p-2 z-20 max-h-64 overflow-y-auto custom-scrollbar">
+                <div className="absolute right-0 top-full mt-2 w-56 bg-slate-900 border border-slate-800 rounded-xl shadow-xl p-2 z-[50] max-h-64 overflow-y-auto custom-scrollbar" role="listbox">
                   {pivotPresets.length === 0 ? (
                     <p className="px-3 py-4 text-xs text-slate-500 text-center">暂无已保存报告</p>
                   ) : (
