@@ -1084,17 +1084,27 @@ const App = () => {
   }, [baseProcessedData, dateRange, dashboardPlatformFilter, dimFilters]);
 
   // --- Data Quality Report Logic ---
-  // 暂时忽略性别和年龄维度的分析
-  const qualityDimensionLabels = useMemo(() => 
-    dimConfigs
-      .filter(d => d.source !== 'age' && d.source !== 'gender')
-      .map(d => d.label), 
+  const qualityDimensionLabels = useMemo(() =>
+    dimConfigs.map(d => d.label),
     [dimConfigs]
   );
 
-  /** 直接取值的 campaign/adSet/ad 不参与“缺失”统计：接口列为空时不计为匹配失败 */
-  const isDirectValueNameDim = (conf: DimensionConfig | undefined) =>
-    conf && conf.index === -1 && ['campaign', 'adSet', 'ad'].includes(conf.source);
+  /** Meta 行层级：Campaign 层级 = Ad Set / Ad 均为空；Ad Set 层级 = Ad 为空且 Ad Set 非空；Ad 层级 = Ad 非空 */
+  const isMetaRow = (row: { _platform?: string }) => row._platform === 'facebook';
+  const isCampaignLevelRow = (row: { _dims?: Record<string, string> }) =>
+    (row._dims?.['Ad Set'] || 'N/A') === 'N/A' && (row._dims?.['Ad'] || 'N/A') === 'N/A';
+  const isAdSetLevelRow = (row: { _dims?: Record<string, string> }) =>
+    (row._dims?.['Ad'] || 'N/A') === 'N/A' && (row._dims?.['Ad Set'] || 'N/A') !== 'N/A';
+  const isAdLevelRow = (row: { _dims?: Record<string, string> }) =>
+    (row._dims?.['Ad'] || 'N/A') !== 'N/A';
+
+  /** 行是否落入某维度的数据源（仅 Meta 按规则：age=Campaign 层级，gender=Ad Set 层级，其他=Ad 层级；非 Meta 全部行） */
+  const isInDimensionDataSource = (row: any, source: string): boolean => {
+    if (!isMetaRow(row)) return true;
+    if (source === 'age') return isCampaignLevelRow(row);
+    if (source === 'gender') return isAdSetLevelRow(row);
+    return isAdLevelRow(row);
+  };
 
   // Auto-select first dimension when configs change
   useEffect(() => {
@@ -1106,7 +1116,7 @@ const App = () => {
     }
   }, [qualityDimensionLabels, selectedQualityDimension]);
 
-  // Overall quality stats
+  // Overall quality stats（Meta：age 仅看 campaign 层级，gender 仅看 ad set 层级，其他维度仅看 ad name 非空；非 Meta 全量）
   const qualityStats = useMemo(() => {
     const total = baseProcessedData.length;
     if (!total || qualityDimensionLabels.length === 0) {
@@ -1116,8 +1126,10 @@ const App = () => {
     baseProcessedData.forEach(row => {
       const hasMissing = qualityDimensionLabels.some(label => {
         const conf = dimConfigs.find(c => c.label === label);
-        if (isDirectValueNameDim(conf)) return false;
-        return (row._dims[label] || 'N/A') === 'N/A';
+        const source = conf?.source ?? '';
+        const inSource = isInDimensionDataSource(row, source);
+        const valueNA = (row._dims[label] || 'N/A') === 'N/A';
+        return inSource && valueNA;
       });
       if (hasMissing) unmatched += 1;
     });
@@ -1126,25 +1138,22 @@ const App = () => {
     return { total, matched, unmatched, matchRate };
   }, [baseProcessedData, qualityDimensionLabels, dimConfigs]);
 
-  // Per-dimension match stats for left sidebar
+  // Per-dimension match stats（Meta：age 数据源=campaign 层级，gender=ad set 层级，其他=ad name 非空；非 Meta 全量）
   const dimensionMatchStats = useMemo(() => {
     if (qualityDimensionLabels.length === 0 || baseProcessedData.length === 0) return [];
-    
+
     return qualityDimensionLabels.map(dimLabel => {
       const conf = dimConfigs.find(c => c.label === dimLabel);
-      const skipMissingForDirectValue = isDirectValueNameDim(conf);
+      const source = conf?.source ?? '';
+      const dataSourceRows = baseProcessedData.filter(row => isInDimensionDataSource(row, source));
+      const total = dataSourceRows.length;
       let missing = 0;
-      if (!skipMissingForDirectValue) {
-        baseProcessedData.forEach(row => {
-          if ((row._dims[dimLabel] || 'N/A') === 'N/A') {
-            missing += 1;
-          }
-        });
-      }
-      const total = baseProcessedData.length;
+      dataSourceRows.forEach(row => {
+        if ((row._dims[dimLabel] || 'N/A') === 'N/A') missing += 1;
+      });
       const matched = total - missing;
       const matchRate = total ? matched / total : 0;
-      
+
       return {
         label: dimLabel,
         total,
@@ -1155,14 +1164,14 @@ const App = () => {
     }).sort((a, b) => a.matchRate - b.matchRate); // Sort by match rate ascending (worst first)
   }, [baseProcessedData, qualityDimensionLabels, dimConfigs]);
 
-  // Unmatched data list for selected dimension（直接取值的 campaign/adSet/ad 不展示未匹配列表）
+  // Unmatched data list for selected dimension（仅展示该维度数据源内且值为 N/A 的行）
   const qualityUnmatchedData = useMemo(() => {
     if (!selectedQualityDimension || baseProcessedData.length === 0) return [];
+
     const conf = dimConfigs.find(c => c.label === selectedQualityDimension);
-    if (isDirectValueNameDim(conf)) return [];
-    
+    const source = conf?.source ?? '';
     const issues = baseProcessedData
-      .filter(row => (row._dims[selectedQualityDimension] || 'N/A') === 'N/A')
+      .filter(row => isInDimensionDataSource(row, source) && (row._dims[selectedQualityDimension] || 'N/A') === 'N/A')
       .map(row => ({
         row,
         campaignName: row._names?.campaign || 'N/A',
@@ -1326,7 +1335,12 @@ const App = () => {
     if (pivotPlatformScopes.length === 0) return [];
     const scopeSet = new Set(pivotPlatformScopes);
     return filteredData.filter(row => {
-      if (row._platform === 'facebook') return scopeSet.has('meta');
+      if (row._platform === 'facebook') {
+        if (!scopeSet.has('meta')) return false;
+        // Meta 透视表默认仅使用 Ad 层级数据，避免与 age_date/gender_adset_date 混算导致重复或 N/A
+        if ((row._dims?.['Ad'] || 'N/A') === 'N/A') return false;
+        return true;
+      }
       if (row._platform === 'google') {
         const gType: GoogleType = row._googleType || 'PERFORMANCE_MAX';
         if (gType === 'SEARCH') return scopeSet.has('google_search');
