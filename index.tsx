@@ -1930,10 +1930,16 @@ const App = () => {
   };
 
   const handleApplyPivotPreset = (preset: PivotPreset) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.tsx:handleApplyPivotPreset:entry',message:'apply preset called',data:{presetId:preset.id,presetName:preset.name,rowsLen:preset.rows?.length,columnsLen:preset.columns?.length,valuesLen:preset.values?.length,rows:preset.rows,columns:preset.columns,values:preset.values},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H2'})}).catch(()=>{});
+    // #endregion
     const validDimKeys = new Set(pivotDimensionFields.map(f => f.key));
     const validValueKeys = new Set(allAvailableMetrics.map(m => m.key));
     const validPlatformScopes = new Set(PIVOT_PLATFORM_OPTIONS.map(p => p.key));
     const safeFilters = preset.filters.filter(f => validDimKeys.has(f.fieldKey));
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.tsx:handleApplyPivotPreset:validKeys',message:'valid keys',data:{validDimKeysSize:validDimKeys.size,validValueKeysSize:validValueKeys.size,validDimKeysSample:Array.from(validDimKeys).slice(0,5),validValueKeysSample:Array.from(validValueKeys).slice(0,5)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
     setPivotFilters(
       safeFilters.map(f => ({
         id: `${f.fieldKey}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -1952,13 +1958,31 @@ const App = () => {
     const filteredRows = preset.rows.filter(k => validDimKeys.has(k));
     const filteredCols = preset.columns.filter(k => validDimKeys.has(k));
     const filteredVals = preset.values.filter(k => validValueKeys.has(k));
-    setPivotRows(filteredRows.length ? filteredRows : preset.rows);
-    setPivotColumns(filteredCols.length ? filteredCols : preset.columns);
-    setPivotValues(filteredVals.length ? filteredVals : preset.values);
+    const finalRows = filteredRows.length ? filteredRows : preset.rows;
+    const finalCols = filteredCols.length ? filteredCols : preset.columns;
+    const finalVals = filteredVals.length ? filteredVals : preset.values;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.tsx:handleApplyPivotPreset:filtered',message:'filtered and final',data:{filteredRowsLen:filteredRows.length,filteredColsLen:filteredCols.length,filteredValsLen:filteredVals.length,finalRowsLen:finalRows.length,finalColsLen:finalCols.length,finalValsLen:finalVals.length,finalRows:finalRows,finalCols:finalCols,finalVals:finalVals},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3-H4'})}).catch(()=>{});
+    // #endregion
+    setPivotRows(finalRows);
+    setPivotColumns(finalCols);
+    setPivotValues(finalVals);
     setPivotDisplay({ ...preset.display });
-    setIsPivotPresetDropdownOpen(false);
-    setActivePivotPresetId(preset.id);
+    // 先提交行/列/值，再关闭下拉，避免同批 setState 时下拉卸载影响透视状态生效
+    queueMicrotask(() => {
+      setIsPivotPresetDropdownOpen(false);
+      setActivePivotPresetId(preset.id);
+    });
   };
+
+  // #region agent log
+  useEffect(() => {
+    if (activeReportTab !== 'pivot') return;
+    if (pivotValues.length === 0 && activePivotPresetId) {
+      fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.tsx:pivot:emptyWithPreset',message:'empty content while report selected',data:{pivotValuesLength:pivotValues.length,pivotRowsLength:pivotRows.length,activePivotPresetId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4-H5'})}).catch(()=>{});
+    }
+  }, [activeReportTab, pivotValues.length, pivotRows.length, activePivotPresetId]);
+  // #endregion
 
   /** 用当前透视配置覆盖指定 id 的已保存报告 */
   const handleUpdatePivotPreset = (id: string, e?: React.MouseEvent) => {
@@ -3200,7 +3224,7 @@ const App = () => {
                       <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mr-2">配置模块</span>
                       {[
                         { id: 'metrics' as const, label: '指标与公式' },
-                        { id: 'dimensions' as const, label: '维度深度解析' },
+                        { id: 'dimensions' as const, label: '维度参数配置' },
                         { id: 'quality' as const, label: '数据质量报告' }
                       ].map(tab => (
                         <button
@@ -3219,7 +3243,7 @@ const App = () => {
                           onClick={() => setMappingTab('dimensions')}
                           className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-500 transition-all shrink-0"
                         >
-                          下一步进入到维度深度解析
+                          下一步进入到维度参数配置
                         </button>
                       )}
                       {mappingTab === 'dimensions' && (
@@ -3393,7 +3417,7 @@ const App = () => {
                   {mappingTab === 'dimensions' && (
                   <div className="bg-slate-900/50 border border-slate-800 rounded-[40px] p-10 shadow-2xl space-y-10">
                     <div>
-                      <h3 className="text-2xl font-black flex items-center gap-4 text-white"><Split className="text-purple-400" /> 维度深度解析</h3>
+                      <h3 className="text-2xl font-black flex items-center gap-4 text-white"><Split className="text-purple-400" /> 维度参数配置</h3>
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -3598,7 +3622,7 @@ const App = () => {
 
                     {baseProcessedData.length > 0 && qualityDimensionLabels.length === 0 && (
                       <div className="bg-slate-800/60 border border-slate-700 rounded-3xl p-8 text-center text-slate-400 text-sm font-bold">
-                        暂未配置维度，请先在"维度深度解析"中设置规则
+                        暂未配置维度，请先在维度参数配置中设置规则
                       </div>
                     )}
 
@@ -3923,7 +3947,7 @@ const App = () => {
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-indigo-400 mt-0.5">•</span>
-                    <span>若发现大量未匹配数据，请在"维度深度解析"标签页调整分隔符或索引配置</span>
+                    <span>若发现大量未匹配数据，请在维度参数配置标签页调整分隔符或索引配置</span>
                   </li>
                 </ul>
               </div>
