@@ -125,7 +125,21 @@ interface PivotPreset {
 
 const PIVOT_PRESETS_STORAGE_PREFIX = 'pivotPresets_';
 
+/** 数据透视可选维度：campaign、ad set、ad、gender、age，仅在字段列表中供选择，不默认应用到筛选器/行/列 */
+const DEFAULT_PIVOT_DIMENSION_LABELS = ['Campaign', 'Ad Set', 'Ad', 'Gender', 'Age'] as const;
+
+/** 维度解析配置：index -1 为直接取值，否则按 delimiter 分段取第 index 段；取值方式（直接取值/下划线/中划线）在配置中统一可选 */
+/** 未保存维度配置的账号项目：Campaign、Ad Set、Ad、Gender、Age 均默认直接取值 */
+const DEFAULT_PIVOT_DIM_CONFIGS: DimensionConfig[] = [
+  { label: 'Campaign', source: 'campaign', index: -1, delimiter: '_' },
+  { label: 'Ad Set', source: 'adSet', index: -1, delimiter: '_' },
+  { label: 'Ad', source: 'ad', index: -1, delimiter: '_' },
+  { label: 'Gender', source: 'gender', index: -1, delimiter: '_' },
+  { label: 'Age', source: 'age', index: -1, delimiter: '_' },
+];
+
 const INITIAL_DIMENSIONS = [
+  ...DEFAULT_PIVOT_DIMENSION_LABELS,
   "国家", "广告类型", "AI vs AO",
   "兴趣组人群", "素材类型", "素材内容", "折扣类型", "视觉类型", "视觉细节"
 ];
@@ -161,14 +175,15 @@ const OPERATORS = ['(', ')', '+', '-', '*', '/', '1000', '100'];
 const MOCK_ACCOUNTS: { id: string; name: string; type: string }[] = [];
 
 const DEFAULT_FORMULAS: FormulaField[] = [
-  { id: 'f_cpm', name: 'CPM', formula: '(impressions / cost) * 1000', unit: '$', isDefault: true },
+  { id: 'f_cpm', name: 'CPM', formula: '(cost / impressions) * 1000', unit: '$', isDefault: true },
   { id: 'f_cpc', name: 'CPC', formula: 'cost / linkClicks', unit: '$', isDefault: true },
   { id: 'f_ctr', name: 'CTR', formula: 'linkClicks / impressions', unit: '%', isDefault: true },
+  { id: 'f_cpa', name: 'CPA', formula: 'cost / conversion', unit: '$', isDefault: true },
   { id: 'f_cpatc', name: 'CPATC', formula: 'cost / addToCart', unit: '$', isDefault: true },
   { id: 'f_freq', name: 'Frequency', formula: 'impressions / reach', unit: '', isDefault: true },
   { id: 'f_aov', name: 'AOV', formula: 'conversionValue / conversion', unit: '$', isDefault: true },
   { id: 'f_roi', name: 'ROI', formula: 'conversionValue / cost', unit: '', isDefault: true },
-  { id: 'f_cpc', name: 'Cost per checkout', formula: 'cost / checkout', unit: '$', isDefault: true },
+  { id: 'f_cpc_checkout', name: 'Cost per checkout', formula: 'cost / checkout', unit: '$', isDefault: true },
   { id: 'f_cps', name: 'Cost per subscription', formula: 'cost / subscribe', unit: '$', isDefault: true },
 ];
 
@@ -242,6 +257,13 @@ const normalizeDimConfigs = (input: any): DimensionConfig[] => {
       return { label: item.label.trim(), source: source as DimensionConfig['source'], index, delimiter };
     })
     .filter(Boolean) as DimensionConfig[];
+};
+
+/** 合并云端维度配置与默认透视维度，保证 Campaign/Ad Set/Ad/Gender/Age 始终存在 */
+const mergeDimConfigsWithPivotDefaults = (fromCloud: DimensionConfig[]): DimensionConfig[] => {
+  const hasLabel = new Set(fromCloud.map(d => d.label));
+  const append = DEFAULT_PIVOT_DIM_CONFIGS.filter(d => !hasLabel.has(d.label));
+  return append.length ? [...fromCloud, ...append] : fromCloud;
 };
 
 // --- Main App ---
@@ -384,7 +406,7 @@ const App = () => {
 
   const getLabelForKey = (key: string) => {
     const labels: Record<string, string> = {
-      campaign: 'Campaign Name', adSet: 'Ad Set Name', ad: 'Ad Name', age: 'Age', gender: 'Gender', cost: 'Amount spent (USD)', leads: 'Leads',
+      campaign: 'Campaign Name', adSet: 'Ad Set Name', ad: 'Ad Name', age: 'Age', gender: 'Gender', cost: 'Cost', leads: 'Leads',
       impressions: 'Impressions', reach: 'Reach', clicks: 'Clicks', linkClicks: 'Link clicks', date: 'Day',
       conversionValue: 'Conversion Value',
       conversion: 'Conversions',
@@ -553,7 +575,7 @@ const App = () => {
   };
 
   const [allDimensions, setAllDimensions] = useState<string[]>(INITIAL_DIMENSIONS);
-  const [dimConfigs, setDimConfigs] = useState<DimensionConfig[]>([]);
+  const [dimConfigs, setDimConfigs] = useState<DimensionConfig[]>(() => [...DEFAULT_PIVOT_DIM_CONFIGS]);
   const [activeDashboardDim, setActiveDashboardDim] = useState<string>('');
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
@@ -591,10 +613,10 @@ const App = () => {
     search: string;
     textValue: string;
     dateRange: { start: string; end: string };
-  }>>([]);
-  const [pivotRows, setPivotRows] = useState<string[]>([]);
-  const [pivotColumns, setPivotColumns] = useState<string[]>([]);
-  const [pivotValues, setPivotValues] = useState<string[]>([]);
+  }>>(() => []);
+  const [pivotRows, setPivotRows] = useState<string[]>(() => []);
+  const [pivotColumns, setPivotColumns] = useState<string[]>(() => []);
+  const [pivotValues, setPivotValues] = useState<string[]>(() => ['cost']);
   const [pivotPlatformScopes, setPivotPlatformScopes] = useState<PivotPlatformScope[]>(DEFAULT_PIVOT_PLATFORM_SCOPES);
   const [pivotDisplay, setPivotDisplay] = useState({
     showSubtotal: false,
@@ -714,18 +736,24 @@ const App = () => {
             console.log('Loaded metric mappings from cloud');
           }
 
-          // 2. Load Dimension Configs
+          // 2. Load Dimension Configs（无云端配置时用默认透视维度；有则合并默认项）
           const savedDimConfigs = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'dimensions');
           const normalizedDimConfigs = normalizeDimConfigs(savedDimConfigs);
-          if (normalizedDimConfigs.length > 0) {
-            setDimConfigs(normalizedDimConfigs);
-            setAllDimensions(prev => {
-              const fromConfig = normalizedDimConfigs.map(d => d.label).filter(Boolean);
-              const merged = [...fromConfig, ...INITIAL_DIMENSIONS.filter(d => !fromConfig.includes(d))];
-              return Array.from(new Set(merged));
-            });
-            console.log('Loaded dimension configs from cloud');
-          }
+          const mergedDimConfigs = normalizedDimConfigs.length > 0
+            ? mergeDimConfigsWithPivotDefaults(normalizedDimConfigs)
+            : DEFAULT_PIVOT_DIM_CONFIGS;
+          setDimConfigs(mergedDimConfigs);
+          setAllDimensions(prev => {
+            const fromConfig = mergedDimConfigs.map(d => d.label).filter(Boolean);
+            const allLabels = Array.from(new Set([...fromConfig, ...INITIAL_DIMENSIONS]));
+            // 默认顺序：Campaign / Ad Set / Ad / Gender / Age 在前，国家在 Age 下方，其余按 INITIAL_DIMENSIONS
+            const orderIndex = new Map(INITIAL_DIMENSIONS.map((d, i) => [d, i]));
+            const atEnd = allLabels.filter(d => !orderIndex.has(d));
+            const ordered = allLabels.filter(d => orderIndex.has(d)).sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
+            return [...ordered, ...atEnd];
+          });
+          if (normalizedDimConfigs.length > 0) console.log('Loaded dimension configs from cloud');
+          else console.log('Using default pivot dimension configs');
 
           // 3. Load Formula Configs（若云端没有 ROI 则自动补上默认 ROI）
           const savedFormulas = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'formulas');
@@ -993,8 +1021,13 @@ const App = () => {
         } else {
           const sourceCol = curMap[conf.source as keyof MappingConfig];
           const sourceVal = String(row[sourceCol] || '');
-          const parts = sourceVal.split(conf.delimiter || '_');
-          dims[conf.label] = parts[conf.index] || 'N/A';
+          // index === -1 表示直接取值（不按分隔符拆段），与 gender/age 一致
+          if (conf.index === -1) {
+            dims[conf.label] = sourceVal || 'N/A';
+          } else {
+            const parts = sourceVal.split(conf.delimiter || '_');
+            dims[conf.label] = parts[conf.index] ?? 'N/A';
+          }
         }
       });
 
@@ -1059,6 +1092,10 @@ const App = () => {
     [dimConfigs]
   );
 
+  /** 直接取值的 campaign/adSet/ad 不参与“缺失”统计：接口列为空时不计为匹配失败 */
+  const isDirectValueNameDim = (conf: DimensionConfig | undefined) =>
+    conf && conf.index === -1 && ['campaign', 'adSet', 'ad'].includes(conf.source);
+
   // Auto-select first dimension when configs change
   useEffect(() => {
     if (qualityDimensionLabels.length > 0 && !selectedQualityDimension) {
@@ -1077,25 +1114,33 @@ const App = () => {
     }
     let unmatched = 0;
     baseProcessedData.forEach(row => {
-      const hasMissing = qualityDimensionLabels.some(label => (row._dims[label] || 'N/A') === 'N/A');
+      const hasMissing = qualityDimensionLabels.some(label => {
+        const conf = dimConfigs.find(c => c.label === label);
+        if (isDirectValueNameDim(conf)) return false;
+        return (row._dims[label] || 'N/A') === 'N/A';
+      });
       if (hasMissing) unmatched += 1;
     });
     const matched = total - unmatched;
     const matchRate = total ? matched / total : 0;
     return { total, matched, unmatched, matchRate };
-  }, [baseProcessedData, qualityDimensionLabels]);
+  }, [baseProcessedData, qualityDimensionLabels, dimConfigs]);
 
   // Per-dimension match stats for left sidebar
   const dimensionMatchStats = useMemo(() => {
     if (qualityDimensionLabels.length === 0 || baseProcessedData.length === 0) return [];
     
     return qualityDimensionLabels.map(dimLabel => {
+      const conf = dimConfigs.find(c => c.label === dimLabel);
+      const skipMissingForDirectValue = isDirectValueNameDim(conf);
       let missing = 0;
-      baseProcessedData.forEach(row => {
-        if ((row._dims[dimLabel] || 'N/A') === 'N/A') {
-          missing += 1;
-        }
-      });
+      if (!skipMissingForDirectValue) {
+        baseProcessedData.forEach(row => {
+          if ((row._dims[dimLabel] || 'N/A') === 'N/A') {
+            missing += 1;
+          }
+        });
+      }
       const total = baseProcessedData.length;
       const matched = total - missing;
       const matchRate = total ? matched / total : 0;
@@ -1108,11 +1153,13 @@ const App = () => {
         matchRate
       };
     }).sort((a, b) => a.matchRate - b.matchRate); // Sort by match rate ascending (worst first)
-  }, [baseProcessedData, qualityDimensionLabels]);
+  }, [baseProcessedData, qualityDimensionLabels, dimConfigs]);
 
-  // Unmatched data list for selected dimension
+  // Unmatched data list for selected dimension（直接取值的 campaign/adSet/ad 不展示未匹配列表）
   const qualityUnmatchedData = useMemo(() => {
     if (!selectedQualityDimension || baseProcessedData.length === 0) return [];
+    const conf = dimConfigs.find(c => c.label === selectedQualityDimension);
+    if (isDirectValueNameDim(conf)) return [];
     
     const issues = baseProcessedData
       .filter(row => (row._dims[selectedQualityDimension] || 'N/A') === 'N/A')
@@ -1125,7 +1172,7 @@ const App = () => {
       }));
 
     return issues;
-  }, [baseProcessedData, selectedQualityDimension]);
+  }, [baseProcessedData, selectedQualityDimension, dimConfigs]);
 
   // Filtered and sorted unmatched data
   const filteredQualityData = useMemo(() => {
@@ -1414,7 +1461,8 @@ const App = () => {
           } else {
             build(level + 1, groupItems);
           }
-          if (pivotDisplay.showSubtotal) {
+          // 仅非叶子层级显示小计，避免每个叶子行后都重复一行“XXX 小计”
+          if (pivotDisplay.showSubtotal && level < rowDims.length - 1) {
             const displayCells = [...(groupItems[0]?.rowArr || [])];
             displayCells[level] = `${val} 小计`;
             for (let i = level + 1; i < rowDims.length; i += 1) displayCells[i] = '';
@@ -1530,39 +1578,49 @@ const App = () => {
 
   const formatPivotValue = (val: number | null, key: string) => {
     if (val === null || val === undefined) return '';
+    const n = Number(val);
+    // 小数点后为 .00 时显示整数，否则保留小数
+    const opts: Intl.NumberFormatOptions = { minimumFractionDigits: 0, maximumFractionDigits: 2 };
     const meta = pivotValueMeta.get(key);
     if (meta?.format === 'currency') {
-      return `$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return `$${n.toLocaleString(undefined, opts)}`;
     }
     if (meta?.format === 'percent') {
-      return `${Number(val).toFixed(2)}%`;
+      return `${n.toLocaleString(undefined, opts)}%`;
     }
-    return Number(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return n.toLocaleString(undefined, opts);
   };
 
   const autoMap = (hdrsBySource: {
     facebook: string[];
     google: Record<GoogleType, string[]>;
   }) => {
-    const findMatch = (hdrs: string[], targets: string[]) => {
+    const findMatch = (hdrs: string[], targets: string[], exclude?: (h: string) => boolean) => {
       for (const t of targets) {
-        const found = hdrs.find(k => k.toLowerCase().includes(t.toLowerCase()));
+        const found = hdrs.find(k => {
+          if (!k.toLowerCase().includes(t.toLowerCase())) return false;
+          if (exclude && exclude(k)) return false;
+          return true;
+        });
         if (found) return found;
       }
       return '';
     };
 
     // 若云端已有非空映射且该列仍在新表头中，则保留；否则用自动匹配。这样拉数后不会覆盖已保存的 metrics 配置
-    const pick = (hdrs: string[], targets: string[], existing: string | undefined): string => {
+    const pick = (hdrs: string[], targets: string[], existing: string | undefined, exclude?: (h: string) => boolean): string => {
       const existingVal = (existing || '').trim();
       if (existingVal && hdrs.includes(existingVal)) return existingVal;
-      return findMatch(hdrs, targets);
+      return findMatch(hdrs, targets, exclude);
     };
 
+    // Facebook campaign 必须对应 Campaign Name，不能对应 Campaign ID
+    const excludeCampaignId = (h: string) => /campaign\s*id|campaignid/i.test(h);
+
     const buildBaseMapping = (hdrs: string[], existing: MappingConfig) => ({
-      campaign: pick(hdrs, ['campaign name'], existing.campaign),
-      adSet: pick(hdrs, ['ad set name', 'adset'], existing.adSet),
-      ad: pick(hdrs, ['ad name', 'creative'], existing.ad),
+      campaign: pick(hdrs, ['campaign name'], existing.campaign, excludeCampaignId),
+      adSet: pick(hdrs, ['ad set name', 'adset'], existing.adSet, (h) => /ad\s*set\s*id|adsetid/i.test(h)),
+      ad: pick(hdrs, ['ad name', 'creative'], existing.ad, (h) => /\bad\s*id\b|^adid$/i.test(h)),
       age: pick(hdrs, ['age'], existing.age),
       gender: pick(hdrs, ['gender'], existing.gender),
       cost: pick(hdrs, ['amount spent', 'spend', 'cost'], existing.cost),
@@ -1930,16 +1988,10 @@ const App = () => {
   };
 
   const handleApplyPivotPreset = (preset: PivotPreset) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.tsx:handleApplyPivotPreset:entry',message:'apply preset called',data:{presetId:preset.id,presetName:preset.name,rowsLen:preset.rows?.length,columnsLen:preset.columns?.length,valuesLen:preset.values?.length,rows:preset.rows,columns:preset.columns,values:preset.values},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H2'})}).catch(()=>{});
-    // #endregion
     const validDimKeys = new Set(pivotDimensionFields.map(f => f.key));
     const validValueKeys = new Set(allAvailableMetrics.map(m => m.key));
     const validPlatformScopes = new Set(PIVOT_PLATFORM_OPTIONS.map(p => p.key));
     const safeFilters = preset.filters.filter(f => validDimKeys.has(f.fieldKey));
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.tsx:handleApplyPivotPreset:validKeys',message:'valid keys',data:{validDimKeysSize:validDimKeys.size,validValueKeysSize:validValueKeys.size,validDimKeysSample:Array.from(validDimKeys).slice(0,5),validValueKeysSample:Array.from(validValueKeys).slice(0,5)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
     setPivotFilters(
       safeFilters.map(f => ({
         id: `${f.fieldKey}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -1961,9 +2013,6 @@ const App = () => {
     const finalRows = filteredRows.length ? filteredRows : preset.rows;
     const finalCols = filteredCols.length ? filteredCols : preset.columns;
     const finalVals = filteredVals.length ? filteredVals : preset.values;
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.tsx:handleApplyPivotPreset:filtered',message:'filtered and final',data:{filteredRowsLen:filteredRows.length,filteredColsLen:filteredCols.length,filteredValsLen:filteredVals.length,finalRowsLen:finalRows.length,finalColsLen:finalCols.length,finalValsLen:finalVals.length,finalRows:finalRows,finalCols:finalCols,finalVals:finalVals},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3-H4'})}).catch(()=>{});
-    // #endregion
     setPivotRows(finalRows);
     setPivotColumns(finalCols);
     setPivotValues(finalVals);
@@ -1974,15 +2023,6 @@ const App = () => {
       setActivePivotPresetId(preset.id);
     });
   };
-
-  // #region agent log
-  useEffect(() => {
-    if (activeReportTab !== 'pivot') return;
-    if (pivotValues.length === 0 && activePivotPresetId) {
-      fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.tsx:pivot:emptyWithPreset',message:'empty content while report selected',data:{pivotValuesLength:pivotValues.length,pivotRowsLength:pivotRows.length,activePivotPresetId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4-H5'})}).catch(()=>{});
-    }
-  }, [activeReportTab, pivotValues.length, pivotRows.length, activePivotPresetId]);
-  // #endregion
 
   /** 用当前透视配置覆盖指定 id 的已保存报告 */
   const handleUpdatePivotPreset = (id: string, e?: React.MouseEvent) => {
@@ -3474,26 +3514,30 @@ const App = () => {
                         </div>
                       </div>
 
-                      {/* Right Side: Dimension Rules */}
-                      <div className="lg:col-span-2 space-y-4 max-h-[520px] overflow-y-auto overflow-x-hidden pr-2 custom-scrollbar">
+                      {/* Right Side: Dimension Rules（行高参考左侧 NAMING CONVENTION SAMPLE） */}
+                      <div className="lg:col-span-2 space-y-2 max-h-[520px] overflow-y-auto overflow-x-hidden pr-2 custom-scrollbar">
                         {allDimensions.map(dim => {
                           const existing = dimConfigs.find(d => d.label === dim);
                           const currentSource = existing?.source || 'campaign';
                           const currentDelimiter = existing?.delimiter || '_';
+                          const isDirect = existing != null && existing.index === -1;
+                          /** 取值方式：直接取值 | 下划线 | 中划线，统一在一个列表中供用户选择 */
+                          const segmentStyle = isDirect ? 'direct' : (currentDelimiter === '-' ? '-' : '_');
                           const sampleStr = namingSamples[currentSource as 'campaign' | 'adSet' | 'ad' | 'age' | 'gender'] || '';
                           const sampleParts = sampleStr ? sampleStr.split(currentDelimiter) : [];
+                          const showIndexDropdown = !isDirect;
                           return (
-                            <div key={dim} className="flex flex-col md:flex-row md:items-center gap-4 p-5 bg-slate-800 rounded-3xl border border-slate-700 shadow-sm group hover:border-purple-700 transition-all relative">
-                              <div className="md:w-40 flex items-center justify-between shrink-0">
-                                <span className="text-[11px] font-black text-slate-200 uppercase tracking-widest">{dim}</span>
-                                <button onClick={() => handleRemoveDimension(dim)} className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-red-500 transition-all p-1 mr-2">
-                                  <Trash2 size={12} />
+                            <div key={dim} className="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-slate-800 rounded-2xl border border-slate-700 shadow-sm group hover:border-purple-700 transition-all relative">
+                              <div className="md:w-36 flex items-center justify-between shrink-0">
+                                <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">{dim}</span>
+                                <button onClick={() => handleRemoveDimension(dim)} className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-red-500 transition-all p-1 mr-1">
+                                  <Trash2 size={10} />
                                 </button>
                               </div>
-                              <div className="grid grid-cols-12 gap-3 flex-1 w-full">
-                                <select className="col-span-12 lg:col-span-5 min-w-0 bg-slate-900 text-[11px] font-black px-5 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.source || ''} onChange={e => {
+                              <div className="grid grid-cols-12 gap-2 flex-1 w-full min-w-0">
+                                <select className="col-span-12 lg:col-span-5 min-w-0 bg-slate-900 text-[10px] font-black px-3 py-2.5 rounded-xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.source || ''} onChange={e => {
                                   const source = e.target.value as any;
-                                  if (source) setDimConfigs(p => [...p.filter(x => x.label !== dim), { label: dim, source, index: existing?.index || 0 }]);
+                                  if (source) setDimConfigs(p => [...p.filter(x => x.label !== dim), { label: dim, source, index: existing?.index ?? 0, delimiter: existing?.delimiter || '_' }]);
                                 }}>
                                   <option value="">来源字段 (Source)</option>
                                   <option value="campaign">Campaign (Naming)</option>
@@ -3503,47 +3547,50 @@ const App = () => {
                                   <option value="gender">Gender</option>
                                   <option value="platform">Platform</option>
                                 </select>
-                                {(currentSource === 'age' || currentSource === 'gender') ? (
-                                  <span className="col-span-12 lg:col-span-7 min-w-0 flex items-center justify-center px-3 py-4 rounded-2xl bg-slate-800/60 border border-slate-700 text-[10px] font-black text-slate-400 uppercase tracking-widest">直接取值</span>
-                                ) : (
-                                  <>
-                                    <select className="col-span-6 lg:col-span-3 min-w-0 bg-slate-900 text-[11px] font-black px-3 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-center text-white" value={existing?.delimiter || '_'} onChange={e => {
-                                      const delimiter = e.target.value;
-                                      if (existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, delimiter }]);
-                                      else setDimConfigs(p => [...p, { label: dim, source: 'campaign', index: 0, delimiter }]);
-                                    }}>
-                                      <option value="_">_ (下划线 | Underscore)</option>
-                                      <option value="-">- (中划线 | Hyphen)</option>
-                                    </select>
-                                    <select className="col-span-6 lg:col-span-4 min-w-0 bg-slate-900 text-[11px] font-black px-5 py-4 rounded-2xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.index ?? ''} onChange={e => {
-                                      const index = parseInt(e.target.value);
-                                      if (!isNaN(index) && existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, index }]);
-                                      else if (!isNaN(index)) setDimConfigs(p => [...p, { label: dim, source: 'campaign', index, delimiter: '_' }]);
-                                    }}>
-                                      <option value="">索引 (Index)</option>
-                                      {sampleParts.length > 0 ? (
-                                        sampleParts.map((part, i) => (
-                                          <option key={i} value={i}>Part {i} ({part})</option>
-                                        ))
-                                      ) : (
-                                        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => <option key={i} value={i}>{i}</option>)
-                                      )}
-                                    </select>
-                                  </>
+                                <select className={`${showIndexDropdown ? 'col-span-6 lg:col-span-3' : 'col-span-12 lg:col-span-7'} min-w-0 bg-slate-900 text-[10px] font-black px-2 py-2.5 rounded-xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-center text-white`} value={segmentStyle} onChange={e => {
+                                  const v = e.target.value;
+                                  if (v === 'direct') {
+                                    if (existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, index: -1 }]);
+                                    else setDimConfigs(p => [...p, { label: dim, source: currentSource as any, index: -1, delimiter: '_' }]);
+                                  } else {
+                                    const delimiter = v as string;
+                                    const index = existing && existing.index !== -1 ? existing.index : 0;
+                                    if (existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, delimiter, index }]);
+                                    else setDimConfigs(p => [...p, { label: dim, source: currentSource as any, index, delimiter }]);
+                                  }
+                                }}>
+                                  <option value="direct">直接取值</option>
+                                  <option value="_">_ (下划线 | Underscore)</option>
+                                  <option value="-">- (中划线 | Hyphen)</option>
+                                </select>
+                                {showIndexDropdown && (
+                                  <select className="col-span-6 lg:col-span-4 min-w-0 bg-slate-900 text-[10px] font-black px-2 py-2.5 rounded-xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.index ?? 0} onChange={e => {
+                                    const index = parseInt(e.target.value, 10);
+                                    if (!isNaN(index) && existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, index }]);
+                                    else if (!isNaN(index)) setDimConfigs(p => [...p, { label: dim, source: currentSource as any, index, delimiter: currentDelimiter }]);
+                                  }}>
+                                    {sampleParts.length > 0 ? (
+                                      sampleParts.map((part, i) => (
+                                        <option key={i} value={i}>Part {i} ({part})</option>
+                                      ))
+                                    ) : (
+                                      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => <option key={i} value={i}>{i}</option>)
+                                    )}
+                                  </select>
                                 )}
                               </div>
                             </div>
                           );
                         })}
 
-                        <div className="p-2">
+                        <div className="p-1">
                           {isAddingDimension ? (
-                            <div className="flex items-center gap-4 p-5 bg-slate-800 rounded-3xl border-2 border-indigo-700 border-dashed animate-in fade-in zoom-in duration-300">
-                              <span className="md:w-32 text-[10px] font-black text-indigo-400 uppercase tracking-widest shrink-0">New Dimension</span>
-                              <div className="flex flex-1 gap-3">
+                            <div className="flex items-center gap-2 p-3 bg-slate-800 rounded-2xl border-2 border-indigo-700 border-dashed animate-in fade-in zoom-in duration-300">
+                              <span className="md:w-28 text-[9px] font-black text-indigo-400 uppercase tracking-widest shrink-0">New Dimension</span>
+                              <div className="flex flex-1 gap-2 min-w-0">
                                 <input
                                   autoFocus
-                                  className="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-5 py-4 text-[11px] font-black outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-900/20 transition-all text-white"
+                                  className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-[10px] font-black outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-900/20 transition-all text-white"
                                   placeholder="输入自定义维度名称..."
                                   value={newDimensionName}
                                   onChange={e => setNewDimensionName(e.target.value)}
@@ -3552,12 +3599,12 @@ const App = () => {
                                     if (e.key === 'Escape') setIsAddingDimension(false);
                                   }}
                                 />
-                                <button onClick={handleAddDimension} className="bg-indigo-600 text-white px-6 rounded-2xl hover:bg-indigo-700 shadow-lg shadow-indigo-900/20 transition-all font-black text-xs min-w-[80px]">确认</button>
-                                <button onClick={() => setIsAddingDimension(false)} className="bg-slate-900 text-slate-400 px-6 rounded-2xl hover:bg-slate-800 border border-slate-700 transition-all font-black text-xs min-w-[80px]">取消</button>
+                                <button onClick={handleAddDimension} className="bg-indigo-600 text-white px-4 py-2.5 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-900/20 transition-all font-black text-[10px] min-w-[64px] shrink-0">确认</button>
+                                <button onClick={() => setIsAddingDimension(false)} className="bg-slate-900 text-slate-400 px-4 py-2.5 rounded-xl hover:bg-slate-800 border border-slate-700 transition-all font-black text-[10px] min-w-[64px] shrink-0">取消</button>
                               </div>
                             </div>
                           ) : (
-                            <button onClick={() => setIsAddingDimension(true)} className="w-full py-5 border-2 border-dashed border-slate-700 rounded-3xl flex items-center justify-center gap-2 text-slate-400 hover:text-indigo-400 hover:border-indigo-700 hover:bg-indigo-900/20 transition-all font-black text-xs uppercase tracking-widest group">
+                            <button onClick={() => setIsAddingDimension(true)} className="w-full py-3 border-2 border-dashed border-slate-700 rounded-2xl flex items-center justify-center gap-2 text-slate-400 hover:text-indigo-400 hover:border-indigo-700 hover:bg-indigo-900/20 transition-all font-black text-[10px] uppercase tracking-widest group">
                               <Plus size={16} className="group-hover:scale-110 transition-transform" /> 增加自定义维度
                             </button>
                           )}
@@ -3858,7 +3905,7 @@ const App = () => {
               {/* Intro */}
               <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-5">
                 <p className="text-sm text-slate-300 leading-relaxed">
-                  系统通过分隔符（<span className="font-black text-indigo-400">下划线 _</span> 或 <span className="font-black text-indigo-400">中划线 -</span>）和索引位置来解析 Campaign/Ad Set/Ad 名称中的维度信息。
+                  每个维度可选择 <span className="font-black text-indigo-400">直接取值</span>，或按 <span className="font-black text-indigo-400">下划线 _</span> / <span className="font-black text-indigo-400">中划线 -</span> 分段并指定索引位置来解析 Campaign/Ad Set/Ad 名称。
                 </p>
               </div>
 
@@ -3877,8 +3924,14 @@ const App = () => {
                         </div>
                         {conf.source !== 'platform' && conf.source !== 'age' && conf.source !== 'gender' && (
                           <div className="flex items-center gap-4 text-xs text-slate-400">
-                            <span>分隔符: <span className="font-mono text-indigo-300">{conf.delimiter || '_'}</span></span>
-                            <span>索引位置: <span className="font-mono text-indigo-300">{conf.index}</span></span>
+                            {conf.index === -1 ? (
+                              <span>取值方式: <span className="font-mono text-indigo-300">直接取值</span></span>
+                            ) : (
+                              <>
+                                <span>分隔符: <span className="font-mono text-indigo-300">{conf.delimiter || '_'}</span></span>
+                                <span>索引位置: <span className="font-mono text-indigo-300">{conf.index}</span></span>
+                              </>
+                            )}
                           </div>
                         )}
                       </div>
@@ -3897,19 +3950,20 @@ const App = () => {
                       <p className="text-sm font-mono text-emerald-400 break-all">{namingSamples.campaign}</p>
                     </div>
                     
-                    {dimConfigs.filter(c => c.source === 'campaign' && c.source !== 'platform' && c.source !== 'age' && c.source !== 'gender').length > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-[10px] font-black text-slate-500 uppercase">解析结果</p>
-                        {(() => {
-                          const parts = namingSamples.campaign.split(dimConfigs.find(c => c.source === 'campaign')?.delimiter || '_');
-                          return dimConfigs
-                            .filter(c => c.source === 'campaign')
-                            .map((conf, idx) => {
-                              const value = parts[conf.index] || 'N/A';
+                        {dimConfigs.filter(c => c.source === 'campaign' && c.source !== 'platform' && c.source !== 'age' && c.source !== 'gender').length > 0 && (
+                          <div className="space-y-2">
+                            <p className="text-[10px] font-black text-slate-500 uppercase">解析结果</p>
+                            {(() => {
+                              const campaignConf = dimConfigs.find(c => c.source === 'campaign');
+                              const parts = namingSamples.campaign.split(campaignConf?.delimiter || '_');
+                              return dimConfigs
+                                .filter(c => c.source === 'campaign')
+                                .map((conf, idx) => {
+                              const value = conf.index === -1 ? namingSamples.campaign : (parts[conf.index] ?? 'N/A');
                               const isValid = value !== 'N/A' && value !== '';
                               return (
                                 <div key={idx} className="flex items-center gap-3">
-                                  <span className="text-xs font-mono text-slate-400">索引 {conf.index}</span>
+                                  <span className="text-xs font-mono text-slate-400">{conf.index === -1 ? '直接取值' : `索引 ${conf.index}`}</span>
                                   <ArrowRight size={12} className="text-slate-600" />
                                   <span className="text-xs font-bold text-slate-300">{conf.label}:</span>
                                   <span className={`text-xs font-mono ${isValid ? 'text-emerald-400' : 'text-red-400'}`}>
