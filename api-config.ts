@@ -144,13 +144,13 @@ export interface ApiResponse {
     data: ApiDataRow[];
 }
 
-// 获取默认日期范围 (最近7天)
+// 获取默认日期范围 (最近15天)
 export function getDefaultDateRange(): { start: string; end: string } {
     const today = new Date();
     const endDate = today.toISOString().split('T')[0];
 
     const startDateObj = new Date(today);
-    startDateObj.setDate(startDateObj.getDate() - 6); // 最近7天
+    startDateObj.setDate(startDateObj.getDate() - 14); // 最近15天
     const startDate = startDateObj.toISOString().split('T')[0];
 
     return { start: startDate, end: endDate };

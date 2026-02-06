@@ -3179,7 +3179,7 @@ const App = () => {
 
                     {/* Date Range */}
                     <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block">2. 选择时间范围 (最近7天)</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block">2. 选择时间范围 (最近15天)</label>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <span className="text-[9px] text-slate-500 uppercase block mb-1">开始日期</span>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Lock, Loader2, AlertCircle, BarChart3, ExternalLink } from 'lucide-react';
+import { User, Lock, Loader2, AlertCircle, BarChart3, ExternalLink, PlayCircle } from 'lucide-react';
 import { fetchUserPermissions, UserInfo } from './auth-service';
 
 interface LoginPageProps {
@@ -126,6 +126,15 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         >
                             <ExternalLink size={14} />
                             <span>账号申请入口</span>
+                        </a>
+                        <a
+                            href="https://tvo7pfzu3em.feishu.cn/wiki/YVg6wTHxPiuE0YkC3t5cpZJWnjf?from=from_copylink"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full flex items-center justify-center gap-2 py-3 text-slate-400 hover:text-indigo-400 text-xs font-medium transition-colors rounded-2xl border border-slate-700/50 hover:border-indigo-500/30"
+                        >
+                            <PlayCircle size={14} />
+                            <span>演示视频</span>
                         </a>
                     </form>
 
