@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Lock, Loader2, AlertCircle, BarChart3 } from 'lucide-react';
+import { User, Lock, Loader2, AlertCircle, BarChart3, ExternalLink } from 'lucide-react';
 import { fetchUserPermissions, UserInfo } from './auth-service';
 
 interface LoginPageProps {
@@ -117,6 +117,16 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                                 <span>身份认证</span>
                             )}
                         </button>
+
+                        <a
+                            href="https://tvo7pfzu3em.feishu.cn/share/base/form/shrcny5j6CayUgZnkiY8Jpkoj2e"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-4 w-full flex items-center justify-center gap-2 py-3 text-slate-400 hover:text-indigo-400 text-xs font-medium transition-colors rounded-2xl border border-slate-700/50 hover:border-indigo-500/30"
+                        >
+                            <ExternalLink size={14} />
+                            <span>账号申请入口</span>
+                        </a>
                     </form>
 
                     <div className="mt-10 text-center">
