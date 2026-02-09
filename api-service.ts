@@ -155,10 +155,13 @@ export function transformApiDataToRawData(apiData: ApiDataRow[]): Record<string,
 
     return apiData.map(row => {
         const isGoogle = row.platform?.toLowerCase().includes('google');
-        const commonData = {
+        const adType = (row.campaignAdvertisingType || '').toUpperCase();
+
+        const commonData: Record<string, any> = {
             // 内部标识字段 (不用于映射下拉)
             '__platform': row.platform ? String(row.platform).toLowerCase() : '',
-            '__campaignAdvertisingType': row.campaignAdvertisingType ? String(row.campaignAdvertisingType).toUpperCase() : '',
+            '__campaignAdvertisingType': adType || '',
+            '__segments': row.segments || '',
 
             // 基础标识字段
             'Campaign Name': row.campaignName || '',
@@ -198,10 +201,43 @@ export function transformApiDataToRawData(apiData: ApiDataRow[]): Record<string,
             'Age': getAge(row),
             'Gender': getGender(row),
 
+            // ---------- 新增字段（按平台/广告类型对接，与 bi_ads_data 文档一致）----------
+            // Meta：country, addsPaymentInfo, costPerAddPaymentInfo, linkUrl, headline（ad date 汇总不变）
+            'Country': row.country ?? '',
+            'Adds of payment info': row.addsPaymentInfo ?? '',
+            'Cost per add of payment info': row.costPerAddPaymentInfo ?? '',
+            'Link (ad settings)': row.linkUrl ?? '',
+            'Headline': row.headline ?? '',
+
+            // Google Search：keyword, searchTerm（Ad set 层级汇总，后端按文档返回）
+            'Search keyword': isGoogle ? (row.keyword ?? '') : '',
+            'Search term': isGoogle ? (row.searchTerm ?? '') : '',
+
+            // Google Demand Gen：文档中全部对应字段（ad data 汇总）
+            'Ad status': isGoogle ? (row.adStatus ?? '') : '',
+            'Ad type': isGoogle ? (row.adType ?? '') : '',
+            'Device preference': isGoogle ? (row.devicePreference ?? '') : '',
+            'Long headline': isGoogle ? (row.longHeadline ?? '') : '',
+            'Description': isGoogle ? (row.descriptions ?? '') : '',
+            'Business name': isGoogle ? (row.businessName ?? '') : '',
+            'Square image ID': isGoogle ? (row.squareImageIds ?? '') : '',
+            'Portrait image ID': isGoogle ? (row.portraitImageIds ?? '') : '',
+            'Logo ID': isGoogle ? (row.logoImageIds ?? '') : '',
+            'Landscape image ID': isGoogle ? (row.landscapeImageIds ?? '') : '',
+            'Video ID': isGoogle ? (row.videoIds ?? '') : '',
+            'Call to action text': isGoogle ? (row.callToActionText ?? '') : '',
+            'Call to action headline': isGoogle ? (row.callToActionHeadline ?? '') : '',
+            'Mobile final URL': isGoogle ? (row.appFinalUrl ?? '') : '',
+            'Display URL': isGoogle ? (row.displayUrl ?? '') : '',
+            'Tracking template': isGoogle ? (row.trackingUrlTemplate ?? '') : '',
+            'Final URL suffix': isGoogle ? (row.finalUrlSuffix ?? '') : '',
+            'Custom parameter': isGoogle ? (row.customerParam ?? '') : '',
+
             // 原始数据保留 (用于高级分析)
             '_raw': row
         };
 
+        // Headline 已在上面统一用 row.headline（Meta + Demand Gen 均有）
         if (isGoogle) {
             return commonData;
         }

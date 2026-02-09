@@ -94,9 +94,78 @@ interface FormulaField {
   isDefault?: boolean;
 }
 
+/** 列维度来源：直接取数据列，不解析命名；scope 表示仅在该平台/类型下有效 */
+const COLUMN_DIMENSION_SOURCES = {
+  meta: { country: 'Country' },
+  google_search: { searchKeyword: 'Search keyword', searchTerm: 'Search term' },
+  google_demand_gen: {
+    adStatus: 'Ad status',
+    adType: 'Ad type',
+    devicePreference: 'Device preference',
+    headline: 'Headline',
+    description: 'Description',
+    businessName: 'Business name',
+    squareImageId: 'Square image ID',
+    portraitImageId: 'Portrait image ID',
+    logoImageId: 'Logo ID',
+    landscapeImageId: 'Landscape image ID',
+    videoId: 'Video ID',
+    callToActionText: 'Call to action text',
+    callToActionHeadline: 'Call to action headline',
+    appFinalUrl: 'Mobile final URL',
+    displayUrl: 'Display URL',
+    trackingUrlTemplate: 'Tracking template',
+    finalUrlSuffix: 'Final URL suffix',
+    customerParam: 'Custom parameter',
+  },
+} as const;
+
+type ColumnSourceMeta = keyof typeof COLUMN_DIMENSION_SOURCES.meta;
+type ColumnSourceSearch = keyof typeof COLUMN_DIMENSION_SOURCES.google_search;
+type ColumnSourceDemandGen = keyof typeof COLUMN_DIMENSION_SOURCES.google_demand_gen;
+type ColumnSource = ColumnSourceMeta | ColumnSourceSearch | ColumnSourceDemandGen;
+
+const COLUMN_SOURCE_TO_SCOPE: Record<ColumnSource, 'meta' | 'google_search' | 'google_demand_gen'> = {
+  country: 'meta',
+  searchKeyword: 'google_search',
+  searchTerm: 'google_search',
+  adStatus: 'google_demand_gen',
+  adType: 'google_demand_gen',
+  devicePreference: 'google_demand_gen',
+  headline: 'google_demand_gen',
+  description: 'google_demand_gen',
+  businessName: 'google_demand_gen',
+  squareImageId: 'google_demand_gen',
+  portraitImageId: 'google_demand_gen',
+  logoImageId: 'google_demand_gen',
+  landscapeImageId: 'google_demand_gen',
+  videoId: 'google_demand_gen',
+  callToActionText: 'google_demand_gen',
+  callToActionHeadline: 'google_demand_gen',
+  appFinalUrl: 'google_demand_gen',
+  displayUrl: 'google_demand_gen',
+  trackingUrlTemplate: 'google_demand_gen',
+  finalUrlSuffix: 'google_demand_gen',
+  customerParam: 'google_demand_gen',
+};
+
+function getColumnNameForSource(source: ColumnSource): string {
+  const m = (COLUMN_DIMENSION_SOURCES.meta as Record<string, string>)[source];
+  if (m) return m;
+  const s = (COLUMN_DIMENSION_SOURCES.google_search as Record<string, string>)[source];
+  if (s) return s;
+  return (COLUMN_DIMENSION_SOURCES.google_demand_gen as Record<string, string>)[source] || '';
+}
+
+const ALL_COLUMN_SOURCES = [
+  ...(Object.keys(COLUMN_DIMENSION_SOURCES.meta) as ColumnSourceMeta[]),
+  ...(Object.keys(COLUMN_DIMENSION_SOURCES.google_search) as ColumnSourceSearch[]),
+  ...(Object.keys(COLUMN_DIMENSION_SOURCES.google_demand_gen) as ColumnSourceDemandGen[]),
+];
+
 interface DimensionConfig {
   label: string;
-  source: 'campaign' | 'adSet' | 'ad' | 'platform' | 'age' | 'gender';
+  source: 'campaign' | 'adSet' | 'ad' | 'platform' | 'age' | 'gender' | ColumnSource;
   index: number;
   delimiter?: string;
 }
@@ -141,7 +210,14 @@ const DEFAULT_PIVOT_DIM_CONFIGS: DimensionConfig[] = [
 const INITIAL_DIMENSIONS = [
   ...DEFAULT_PIVOT_DIMENSION_LABELS,
   "国家", "广告类型", "AI vs AO",
-  "兴趣组人群", "素材类型", "素材内容", "折扣类型", "视觉类型", "视觉细节"
+  "兴趣组人群", "素材类型", "素材内容", "折扣类型", "视觉类型", "视觉细节",
+  // 按平台新增列维度（Meta / Google Search / Google Demand Gen）
+  "Country",
+  "Search keyword", "Search term",
+  "Ad status", "Ad type", "Device preference", "Headline", "Description", "Business name",
+  "Square image ID", "Portrait image ID", "Logo ID", "Landscape image ID", "Video ID",
+  "Call to action text", "Call to action headline",
+  "Mobile final URL", "Display URL", "Tracking template", "Final URL suffix", "Custom parameter",
 ];
 
 const BUILTIN_BI_CARD_OPTIONS = [
@@ -246,7 +322,10 @@ const normalizeDimConfigs = (input: any): DimensionConfig[] => {
     }
   }
   if (!Array.isArray(data)) return [];
-  const allowedSources = new Set(['campaign', 'adSet', 'ad', 'platform', 'age', 'gender']);
+  const allowedSources = new Set([
+    'campaign', 'adSet', 'ad', 'platform', 'age', 'gender',
+    ...ALL_COLUMN_SOURCES,
+  ]);
   return data
     .map((item: any) => {
       if (!item || typeof item.label !== 'string') return null;
@@ -949,9 +1028,11 @@ const App = () => {
       setIsLoadingData(false);
     }
   };
-  // Extract samples for the current platform
+  // Extract samples for the current platform（含列维度样本，供 NAMING CONVENTION 与维度配置展示）
   const namingSamples = useMemo(() => {
-    if (!rawData.length) return { campaign: '', adSet: '', ad: '', age: '', gender: '' };
+    const emptyColSamples: Record<string, string> = {};
+    ALL_COLUMN_SOURCES.forEach(s => { emptyColSamples[s] = ''; });
+    if (!rawData.length) return { campaign: '', adSet: '', ad: '', age: '', gender: '', ...emptyColSamples };
     const curMap = activePlatformTab === 'facebook'
       ? mappings.facebook
       : mappings.google[activeGoogleType];
@@ -961,12 +1042,18 @@ const App = () => {
       if (platform !== 'google') return false;
       return inferGoogleTypeFromRow(row) === activeGoogleType;
     }) || rawData[0];
+    const colSamples: Record<string, string> = {};
+    ALL_COLUMN_SOURCES.forEach(source => {
+      const colName = getColumnNameForSource(source as ColumnSource);
+      colSamples[source] = String(sampleRow[colName] ?? '').trim();
+    });
     return {
       campaign: String(sampleRow[curMap.campaign] || ''),
       adSet: String(sampleRow[curMap.adSet] || ''),
       ad: String(sampleRow[curMap.ad] || ''),
       age: String(sampleRow[curMap.age] || ''),
-      gender: String(sampleRow[curMap.gender] || '')
+      gender: String(sampleRow[curMap.gender] || ''),
+      ...colSamples,
     };
   }, [rawData, mappings, activePlatformTab, activeGoogleType]);
 
@@ -1006,7 +1093,15 @@ const App = () => {
 
       const dims: Record<string, string> = {};
       dimConfigs.forEach(conf => {
-        if (conf.source === 'platform') {
+        if (ALL_COLUMN_SOURCES.includes(conf.source as ColumnSource)) {
+          const scope = COLUMN_SOURCE_TO_SCOPE[conf.source as ColumnSource];
+          const matchesScope =
+            (scope === 'meta' && platformValue === 'facebook') ||
+            (scope === 'google_search' && platformValue === 'google' && googleType === 'SEARCH') ||
+            (scope === 'google_demand_gen' && platformValue === 'google' && googleType === 'DEMAND_GEN');
+          const colName = getColumnNameForSource(conf.source as ColumnSource);
+          dims[conf.label] = matchesScope ? (String(row[colName] ?? '').trim() || 'N/A') : 'N/A';
+        } else if (conf.source === 'platform') {
           if (platformValue === 'google') {
             dims[conf.label] = `Google - ${googleType}`;
           } else if (platformValue === 'facebook') {
@@ -1043,6 +1138,7 @@ const App = () => {
           ad: String(row[curMap.ad] || '')
         },
         _metrics: { ...context, ...formulaResults },
+        __segments: row.__segments ?? '',
       };
     });
 
@@ -1098,8 +1194,15 @@ const App = () => {
   const isAdLevelRow = (row: { _dims?: Record<string, string> }) =>
     (row._dims?.['Ad'] || 'N/A') !== 'N/A';
 
-  /** 行是否落入某维度的数据源（仅 Meta 按规则：age=Campaign 层级，gender=Ad Set 层级，其他=Ad 层级；非 Meta 全部行） */
+  /** 行是否落入某维度的数据源（Meta：age=Campaign 层级，gender=Ad Set 层级，其他=Ad 层级；列维度=该平台/类型下全部行） */
   const isInDimensionDataSource = (row: any, source: string): boolean => {
+    if (ALL_COLUMN_SOURCES.includes(source as ColumnSource)) {
+      const scope = COLUMN_SOURCE_TO_SCOPE[source as ColumnSource];
+      if (scope === 'meta') return row._platform === 'facebook';
+      if (scope === 'google_search') return row._platform === 'google' && row._googleType === 'SEARCH';
+      if (scope === 'google_demand_gen') return row._platform === 'google' && row._googleType === 'DEMAND_GEN';
+      return false;
+    }
     if (!isMetaRow(row)) return true;
     if (source === 'age') return isCampaignLevelRow(row);
     if (source === 'gender') return isAdSetLevelRow(row);
@@ -1760,7 +1863,7 @@ const App = () => {
       expandedStartD.setDate(expandedStartD.getDate() - days);
       const expandedStart = expandedStartD.toISOString().split('T')[0];
 
-      const segmentList = ['age_date', 'gender_adset_date'];
+      const segmentList = ['ad_date', 'age_date', 'gender_adset_date'];
 
       const apiData = await fetchAllPlatformsData(
         selectedProject.projectId,
@@ -2231,10 +2334,12 @@ const App = () => {
     const cur = filteredData;
     const last = lastPeriodFilteredData;
     const baseKeys = [...BASE_METRICS, ...Object.keys(customMetricLabels)];
+    // 只汇总 segments=ad_date 的行，避免 age_date/gender_adset_date 等拆分行重复累加 cost
+    const baseRows = (data: typeof cur) => data.filter(r => (r.__segments || '').toLowerCase() === 'ad_date');
     const sumContext = (data: typeof cur) => {
       const ctx: Record<string, number> = {};
       baseKeys.forEach(k => { ctx[k] = 0; });
-      data.forEach(r => {
+      baseRows(data).forEach(r => {
         baseKeys.forEach(k => { ctx[k] += r._metrics[k] || 0; });
       });
       return ctx;
@@ -3525,6 +3630,36 @@ const App = () => {
                             <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Ad Name Sample</label>
                             <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.ad}>{namingSamples.ad || 'N/A'}</div>
                           </div>
+                          {/* 按平台展示列维度样本：Meta=Country；Google Search=Search keyword/term；Demand Gen=Ad status 等 */}
+                          {activePlatformTab === 'facebook' && (
+                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Country (Meta)</label>
+                              <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={(namingSamples as Record<string, string>).country}>{(namingSamples as Record<string, string>).country || 'N/A'}</div>
+                            </div>
+                          )}
+                          {activePlatformTab === 'google' && activeGoogleType === 'SEARCH' && (
+                            <>
+                              <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                                <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Search keyword</label>
+                                <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={(namingSamples as Record<string, string>).searchKeyword}>{(namingSamples as Record<string, string>).searchKeyword || 'N/A'}</div>
+                              </div>
+                              <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                                <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Search term</label>
+                                <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={(namingSamples as Record<string, string>).searchTerm}>{(namingSamples as Record<string, string>).searchTerm || 'N/A'}</div>
+                              </div>
+                            </>
+                          )}
+                          {activePlatformTab === 'google' && activeGoogleType === 'DEMAND_GEN' && (
+                            <div className="space-y-2 max-h-[240px] overflow-y-auto custom-scrollbar">
+                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest sticky top-0 bg-slate-800 py-1">Demand Gen 列维度样本</p>
+                              {(['adStatus', 'adType', 'devicePreference', 'headline', 'description', 'businessName', 'squareImageId', 'portraitImageId', 'logoImageId', 'landscapeImageId', 'videoId', 'callToActionText', 'callToActionHeadline', 'appFinalUrl', 'displayUrl', 'trackingUrlTemplate', 'finalUrlSuffix', 'customerParam'] as const).map(src => (
+                                <div key={src} className="bg-slate-900/50 p-2 rounded-xl border border-slate-800">
+                                  <label className="text-[8px] font-black text-slate-500 uppercase block mb-0.5">{getColumnNameForSource(src)}</label>
+                                  <div className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap" title={(namingSamples as Record<string, string>)[src]}>{(namingSamples as Record<string, string>)[src] || 'N/A'}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -3534,12 +3669,13 @@ const App = () => {
                           const existing = dimConfigs.find(d => d.label === dim);
                           const currentSource = existing?.source || 'campaign';
                           const currentDelimiter = existing?.delimiter || '_';
-                          const isDirect = existing != null && existing.index === -1;
-                          /** 取值方式：直接取值 | 下划线 | 中划线，统一在一个列表中供用户选择 */
+                          const isColumnSource = ALL_COLUMN_SOURCES.includes(currentSource as ColumnSource);
+                          const isDirect = existing != null && (existing.index === -1 || isColumnSource);
+                          /** 取值方式：直接取值 | 下划线 | 中划线；列维度仅直接取值 */
                           const segmentStyle = isDirect ? 'direct' : (currentDelimiter === '-' ? '-' : '_');
-                          const sampleStr = namingSamples[currentSource as 'campaign' | 'adSet' | 'ad' | 'age' | 'gender'] || '';
+                          const sampleStr = (namingSamples as Record<string, string>)[currentSource] ?? '';
                           const sampleParts = sampleStr ? sampleStr.split(currentDelimiter) : [];
-                          const showIndexDropdown = !isDirect;
+                          const showIndexDropdown = !isDirect && !isColumnSource;
                           return (
                             <div key={dim} className="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-slate-800 rounded-2xl border border-slate-700 shadow-sm group hover:border-purple-700 transition-all relative">
                               <div className="md:w-36 flex items-center justify-between shrink-0">
@@ -3551,7 +3687,7 @@ const App = () => {
                               <div className="grid grid-cols-12 gap-2 flex-1 w-full min-w-0">
                                 <select className="col-span-12 lg:col-span-5 min-w-0 bg-slate-900 text-[10px] font-black px-3 py-2.5 rounded-xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.source || ''} onChange={e => {
                                   const source = e.target.value as any;
-                                  if (source) setDimConfigs(p => [...p.filter(x => x.label !== dim), { label: dim, source, index: existing?.index ?? 0, delimiter: existing?.delimiter || '_' }]);
+                                  if (source) setDimConfigs(p => [...p.filter(x => x.label !== dim), { label: dim, source, index: ALL_COLUMN_SOURCES.includes(source) ? -1 : (existing?.index ?? 0), delimiter: existing?.delimiter || '_' }]);
                                 }}>
                                   <option value="">来源字段 (Source)</option>
                                   <option value="campaign">Campaign (Naming)</option>
@@ -3560,6 +3696,33 @@ const App = () => {
                                   <option value="age">Age</option>
                                   <option value="gender">Gender</option>
                                   <option value="platform">Platform</option>
+                                  <optgroup label="Meta 列维度">
+                                    <option value="country">Country</option>
+                                  </optgroup>
+                                  <optgroup label="Google Search 列维度">
+                                    <option value="searchKeyword">Search keyword</option>
+                                    <option value="searchTerm">Search term</option>
+                                  </optgroup>
+                                  <optgroup label="Google Demand Gen 列维度">
+                                    <option value="adStatus">Ad status</option>
+                                    <option value="adType">Ad type</option>
+                                    <option value="devicePreference">Device preference</option>
+                                    <option value="headline">Headline</option>
+                                    <option value="description">Description</option>
+                                    <option value="businessName">Business name</option>
+                                    <option value="squareImageId">Square image ID</option>
+                                    <option value="portraitImageId">Portrait image ID</option>
+                                    <option value="logoImageId">Logo ID</option>
+                                    <option value="landscapeImageId">Landscape image ID</option>
+                                    <option value="videoId">Video ID</option>
+                                    <option value="callToActionText">Call to action text</option>
+                                    <option value="callToActionHeadline">Call to action headline</option>
+                                    <option value="appFinalUrl">Mobile final URL</option>
+                                    <option value="displayUrl">Display URL</option>
+                                    <option value="trackingUrlTemplate">Tracking template</option>
+                                    <option value="finalUrlSuffix">Final URL suffix</option>
+                                    <option value="customerParam">Custom parameter</option>
+                                  </optgroup>
                                 </select>
                                 <select className={`${showIndexDropdown ? 'col-span-6 lg:col-span-3' : 'col-span-12 lg:col-span-7'} min-w-0 bg-slate-900 text-[10px] font-black px-2 py-2.5 rounded-xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-center text-white`} value={segmentStyle} onChange={e => {
                                   const v = e.target.value;
