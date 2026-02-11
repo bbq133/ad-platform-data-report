@@ -26,11 +26,6 @@ export async function fetchAdData(params: ApiRequestParams): Promise<ApiDataRow[
         queryParams.append('filterAccountIdList', id)
     );
 
-    // 分段维度：age_date 返回年龄，gender_adset_date 返回性别（接口需带 segment 才有对应字段）
-    params.segmentList?.forEach(seg =>
-        queryParams.append('segment', seg)
-    );
-
     const url = `${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.GET_ALL_FILTER_DATA}?${queryParams}`;
 
     const response = await fetch(url, {
@@ -85,21 +80,18 @@ export async function fetchProjectList(): Promise<ProjectOption[]> {
 
 /**
  * 同时获取 Facebook 和 Google 数据
- * @param segmentList 分段维度：传 ['age_date'] 可返回年龄，['gender_adset_date'] 可返回性别，两者都传则都有
  */
 export async function fetchAllPlatformsData(
     projectId: number,
     startDate: string,
     endDate: string,
-    filterAccountIdList?: string[],
-    segmentList?: string[]
+    filterAccountIdList?: string[]
 ): Promise<ApiDataRow[]> {
     const baseParams = {
         projectId,
         startDate,
         endDate,
-        filterAccountIdList,
-        segmentList
+        filterAccountIdList
     };
 
     // 并行请求两个平台的数据
@@ -112,8 +104,9 @@ export async function fetchAllPlatformsData(
 }
 
 /**
+/**
  * 将 API 数据转换为系统内部格式 (RawDataRow)
- * 保持与原有 Excel/CSV 导入格式兼容
+ * 字段与《BI 广告数据查询与导出接口文档_字段完整版》一致，保持与 Excel/CSV 导入格式兼容
  */
 export function transformApiDataToRawData(apiData: ApiDataRow[]): Record<string, any>[] {
     const parseExtra = (extra: unknown): Record<string, any> | null => {
@@ -157,63 +150,103 @@ export function transformApiDataToRawData(apiData: ApiDataRow[]): Record<string,
         const isGoogle = row.platform?.toLowerCase().includes('google');
         const adType = (row.campaignAdvertisingType || '').toUpperCase();
 
+        // costUsd 可能为字符串 "0.000000"（Google 后端未提供 USD 转换时），此时应回退到 cost
+        const costUsdNum = parseFloat(String(row.costUsd ?? '0')) || 0;
+        const costNum = parseFloat(String(row.cost ?? '0')) || 0;
+        const effectiveCostUsd = costUsdNum > 0 ? costUsdNum : costNum;
+
         const commonData: Record<string, any> = {
-            // 内部标识字段 (不用于映射下拉)
+            // 内部标识
             '__platform': row.platform ? String(row.platform).toLowerCase() : '',
             '__campaignAdvertisingType': adType || '',
             '__segments': row.segments || '',
 
-            // 基础标识字段
+            // 基础维度（与文档 Excel 列名对应）
             'Campaign Name': row.campaignName || '',
             'Ad Set Name': row.adsetName || '',
             'Ad Name': row.adName || '',
             'Day': row.recordDate || '',
-
-            // ID 字段 (额外)
             'Campaign ID': row.campaignId || '',
             'Ad Set ID': row.adsetId || '',
             'Ad ID': row.adId || '',
             'Account ID': row.accountId || '',
             'Account Name': row.accountName || '',
+            'Campaign 目标': row.campaignObjective ?? '',
+            'Campaign 类型': row.campaignAdvertisingType ?? '',
+            'Adset 状态': row.adsetStatus ?? '',
+            'Adset 类型': row.adsetType ?? '',
+            '关键词 ID': row.keywordId ?? '',
+            '关键词': row.keyword ?? '',
+            '搜索词': row.searchTerm ?? '',
+            '广告强度': row.adStrength ?? '',
+            '最终落地页 URL': row.finalUrls ?? '',
+            '广告素材 URL': row.adImageUrl ?? '',
+            '广告类型': row.adType ?? '',
+            '广告状态': row.adStatus ?? '',
+            '广告受众': row.audienceSegments ?? '',
+            '国家': row.country ?? '',
+            '设备': row.device ?? '',
+            '地区': row.region ?? '',
+            '广告标签': row.adTags ?? '',
+            '来源': row.source ?? '',
+            '媒介': row.medium ?? '',
+            'Campaign 预算': row.campaignBudget ?? 0,
 
-            // 核心花费指标
-            'Amount spent (USD)': row.costUsd ?? row.cost ?? 0,
-            'Spend': row.cost ?? 0,
-
-            // 曝光与触达
+            // 核心指标（与文档一致）
+            'Amount spent (USD)': effectiveCostUsd,
+            'Spend': costNum,
+            '货币': row.currency ?? '',
             'Impressions': row.impressions ?? 0,
             'Reach': row.reach ?? 0,
-
-            // 点击指标
             'Clicks (all)': row.clicks ?? 0,
             'Link clicks': row.linkClicks ?? 0,
-
-            // 通用转化指标
             'Purchases': row.conversion ?? 0,
             'Purchases conversion value': row.conversionValue ?? 0,
             'Add to Cart': row.addToCart ?? 0,
+            'Add to Wishlist': row.addToWishlist ?? 0,
             'Landing page views': row.landingPageViews ?? 0,
-
-            // GA 指标
+            'Checkouts initiated': row.checkout ?? 0,
+            '平均浏览页数': row.averagePageViews ?? 0,
+            '跳出率': row.bounceRate ?? 0,
+            '总转化次数': row.allConversions ?? 0,
+            '互动数': row.engagements ?? 0,
+            'Post comments': row.postComments ?? 0,
+            'Post reactions': row.postReactions ?? 0,
+            'Post saves': row.postSaves ?? 0,
+            'Post shares': row.postShares ?? 0,
+            'Video views': row.videoViews ?? 0,
+            'Video views 25%': row.videoViews25 ?? 0,
+            'Video views 50%': row.videoViews50 ?? 0,
+            'Video views 75%': row.videoViews75 ?? 0,
+            'Video views 100%': row.videoViews100 ?? 0,
+            'Leads': row.leads ?? 0,
+            'Subscriptions': row.subscribe ?? 0,
+            '用户数': row.users ?? 0,
+            '会话数': row.sessions ?? 0,
+            '平均浏览时间': row.averageViewTime ?? 0,
+            '浓度报告数量': row.dashboardCount ?? 0,
+            '浓度报告收入': row.dashboardRevenue ?? 0,
+            '浓度报告回访人数': row.dashboardRevisitCount ?? 0,
             'Total site sale value': row.gaConvertedRevenue ?? 0,
+            'GA4 货币': row.gaCurrency ?? '',
+            '广告所属大类': row.category ?? '',
+            '产品系列': row.productSeries ?? '',
+            '视频观看时长(秒)': row.watchTimeDuration ?? 0,
 
-            // 年龄/性别（需接口传 segment=age_date、segment=gender_adset_date 才有值）
+            // 年龄/性别
             'Age': getAge(row),
             'Gender': getGender(row),
 
-            // ---------- 新增字段（按平台/广告类型对接，与 bi_ads_data 文档一致）----------
-            // Meta：country, addsPaymentInfo, costPerAddPaymentInfo, linkUrl, headline（ad date 汇总不变）
+            // Meta 常用维度/指标
             'Country': row.country ?? '',
-            'Adds of payment info': row.addsPaymentInfo ?? '',
-            'Cost per add of payment info': row.costPerAddPaymentInfo ?? '',
+            'Adds of payment info': row.addsPaymentInfo ?? 0,
+            'Cost per add of payment info': row.costPerAddPaymentInfo ?? 0,
             'Link (ad settings)': row.linkUrl ?? '',
             'Headline': row.headline ?? '',
 
-            // Google Search：keyword, searchTerm（Ad set 层级汇总，后端按文档返回）
+            // Google 维度与素材（按文档）
             'Search keyword': isGoogle ? (row.keyword ?? '') : '',
             'Search term': isGoogle ? (row.searchTerm ?? '') : '',
-
-            // Google Demand Gen：文档中全部对应字段（ad data 汇总）
             'Ad status': isGoogle ? (row.adStatus ?? '') : '',
             'Ad type': isGoogle ? (row.adType ?? '') : '',
             'Device preference': isGoogle ? (row.devicePreference ?? '') : '',
@@ -224,6 +257,8 @@ export function transformApiDataToRawData(apiData: ApiDataRow[]): Record<string,
             'Portrait image ID': isGoogle ? (row.portraitImageIds ?? '') : '',
             'Logo ID': isGoogle ? (row.logoImageIds ?? '') : '',
             'Landscape image ID': isGoogle ? (row.landscapeImageIds ?? '') : '',
+            'Image ID': isGoogle ? (row.landscapeImageIds ?? '') : '',
+            'Landscape logo ID': '',
             'Video ID': isGoogle ? (row.videoIds ?? '') : '',
             'Call to action text': isGoogle ? (row.callToActionText ?? '') : '',
             'Call to action headline': isGoogle ? (row.callToActionHeadline ?? '') : '',
@@ -231,23 +266,18 @@ export function transformApiDataToRawData(apiData: ApiDataRow[]): Record<string,
             'Display URL': isGoogle ? (row.displayUrl ?? '') : '',
             'Tracking template': isGoogle ? (row.trackingUrlTemplate ?? '') : '',
             'Final URL suffix': isGoogle ? (row.finalUrlSuffix ?? '') : '',
+            'Final URL': isGoogle ? (row.finalUrls ?? '') : '',
             'Custom parameter': isGoogle ? (row.customerParam ?? '') : '',
+            '广告预览链接': row.previewLink ?? '',
 
-            // 原始数据保留 (用于高级分析)
             '_raw': row
         };
 
-        // Headline 已在上面统一用 row.headline（Meta + Demand Gen 均有）
         if (isGoogle) {
             return commonData;
         }
 
-        return {
-            ...commonData,
-            'Leads': row.leads ?? 0,
-            'Checkouts initiated': row.checkout ?? 0,
-            'Subscriptions': row.subscribe ?? 0,
-        };
+        return { ...commonData };
     });
 }
 

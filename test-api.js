@@ -6,7 +6,7 @@
 
 const API_CONFIG = {
   BASE_URL: 'https://api.globaloneclick.org',
-  ENDPOINT: '/project/adsData/getAllFilterData',
+  ENDPOINT: '/project/biAdsData/getAllFilterData',
   AUTH_TOKEN: 'globaloneclick',
   CLIENT_ID: 'globaloneclickClientId'
 };

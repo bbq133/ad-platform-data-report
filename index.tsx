@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, startTransition } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Upload,
@@ -94,24 +94,27 @@ interface FormulaField {
   isDefault?: boolean;
 }
 
-/** 列维度来源：直接取数据列，不解析命名；scope 表示仅在该平台/类型下有效 */
+/** 列维度来源：直接取数据列，不解析命名；scope 表示仅在该平台/类型下有效。Meta 的 country 为层级 segment，不在此列 */
 const COLUMN_DIMENSION_SOURCES = {
-  meta: { country: 'Country' },
+  meta: {} as Record<string, string>,
   google_search: { searchKeyword: 'Search keyword', searchTerm: 'Search term' },
   google_demand_gen: {
     adStatus: 'Ad status',
     adType: 'Ad type',
     devicePreference: 'Device preference',
     headline: 'Headline',
+    longHeadline: 'Long headline',
     description: 'Description',
     businessName: 'Business name',
+    imageId: 'Image ID',
     squareImageId: 'Square image ID',
     portraitImageId: 'Portrait image ID',
     logoImageId: 'Logo ID',
-    landscapeImageId: 'Landscape image ID',
+    landscapeLogoId: 'Landscape logo ID',
     videoId: 'Video ID',
     callToActionText: 'Call to action text',
     callToActionHeadline: 'Call to action headline',
+    finalUrl: 'Final URL',
     appFinalUrl: 'Mobile final URL',
     displayUrl: 'Display URL',
     trackingUrlTemplate: 'Tracking template',
@@ -126,22 +129,24 @@ type ColumnSourceDemandGen = keyof typeof COLUMN_DIMENSION_SOURCES.google_demand
 type ColumnSource = ColumnSourceMeta | ColumnSourceSearch | ColumnSourceDemandGen;
 
 const COLUMN_SOURCE_TO_SCOPE: Record<ColumnSource, 'meta' | 'google_search' | 'google_demand_gen'> = {
-  country: 'meta',
   searchKeyword: 'google_search',
   searchTerm: 'google_search',
   adStatus: 'google_demand_gen',
   adType: 'google_demand_gen',
   devicePreference: 'google_demand_gen',
   headline: 'google_demand_gen',
+  longHeadline: 'google_demand_gen',
   description: 'google_demand_gen',
   businessName: 'google_demand_gen',
+  imageId: 'google_demand_gen',
   squareImageId: 'google_demand_gen',
   portraitImageId: 'google_demand_gen',
   logoImageId: 'google_demand_gen',
-  landscapeImageId: 'google_demand_gen',
+  landscapeLogoId: 'google_demand_gen',
   videoId: 'google_demand_gen',
   callToActionText: 'google_demand_gen',
   callToActionHeadline: 'google_demand_gen',
+  finalUrl: 'google_demand_gen',
   appFinalUrl: 'google_demand_gen',
   displayUrl: 'google_demand_gen',
   trackingUrlTemplate: 'google_demand_gen',
@@ -165,7 +170,7 @@ const ALL_COLUMN_SOURCES = [
 
 interface DimensionConfig {
   label: string;
-  source: 'campaign' | 'adSet' | 'ad' | 'platform' | 'age' | 'gender' | ColumnSource;
+  source: 'campaign' | 'adSet' | 'ad' | 'platform' | 'age' | 'gender' | 'country' | ColumnSource;
   index: number;
   delimiter?: string;
 }
@@ -190,34 +195,32 @@ interface PivotPreset {
   values: string[];
   display: { showSubtotal: boolean; showGrandTotal: boolean; totalAxis: 'row' | 'column' };
   platformScopes: PivotPlatformScope[];
+  segmentMode?: PivotSegmentMode;
 }
 
 const PIVOT_PRESETS_STORAGE_PREFIX = 'pivotPresets_';
 
-/** 数据透视可选维度：campaign、ad set、ad、gender、age，仅在字段列表中供选择，不默认应用到筛选器/行/列 */
-const DEFAULT_PIVOT_DIMENSION_LABELS = ['Campaign', 'Ad Set', 'Ad', 'Gender', 'Age'] as const;
+/** 数据透视可选维度：默认包含 campaign、ad set、ad、gender、age、国家、广告类型、Keyword、Search Term、Asset Group */
+const DEFAULT_PIVOT_DIMENSION_LABELS = ['Campaign', 'Ad Set', 'Ad', 'Gender', 'Age', '国家', '广告类型', 'Keyword', 'Search Term', 'Asset Group'] as const;
 
 /** 维度解析配置：index -1 为直接取值，否则按 delimiter 分段取第 index 段；取值方式（直接取值/下划线/中划线）在配置中统一可选 */
-/** 未保存维度配置的账号项目：Campaign、Ad Set、Ad、Gender、Age 均默认直接取值 */
+/** 默认维度：Campaign、Ad Set、Ad、Gender、Age、国家、广告类型、Keyword、Search Term、Asset Group，均默认直接取值并匹配对应字段 */
 const DEFAULT_PIVOT_DIM_CONFIGS: DimensionConfig[] = [
   { label: 'Campaign', source: 'campaign', index: -1, delimiter: '_' },
   { label: 'Ad Set', source: 'adSet', index: -1, delimiter: '_' },
   { label: 'Ad', source: 'ad', index: -1, delimiter: '_' },
   { label: 'Gender', source: 'gender', index: -1, delimiter: '_' },
   { label: 'Age', source: 'age', index: -1, delimiter: '_' },
+  { label: '国家', source: 'country', index: -1, delimiter: '_' },
+  { label: '广告类型', source: 'adType', index: -1, delimiter: '_' },
+  { label: 'Keyword', source: 'searchKeyword', index: -1, delimiter: '_' },
+  { label: 'Search Term', source: 'searchTerm', index: -1, delimiter: '_' },
+  { label: 'Asset Group', source: 'adSet', index: -1, delimiter: '_' },
 ];
 
+/** 默认展示的维度列表；用户可通过「增加自定义维度」添加更多 */
 const INITIAL_DIMENSIONS = [
   ...DEFAULT_PIVOT_DIMENSION_LABELS,
-  "国家", "广告类型", "AI vs AO",
-  "兴趣组人群", "素材类型", "素材内容", "折扣类型", "视觉类型", "视觉细节",
-  // 按平台新增列维度（Meta / Google Search / Google Demand Gen）
-  "Country",
-  "Search keyword", "Search term",
-  "Ad status", "Ad type", "Device preference", "Headline", "Description", "Business name",
-  "Square image ID", "Portrait image ID", "Logo ID", "Landscape image ID", "Video ID",
-  "Call to action text", "Call to action headline",
-  "Mobile final URL", "Display URL", "Tracking template", "Final URL suffix", "Custom parameter",
 ];
 
 const BUILTIN_BI_CARD_OPTIONS = [
@@ -231,26 +234,217 @@ type BiCardKey = string;
 const DEFAULT_BI_CARD_ORDER: BiCardKey[] = BUILTIN_BI_CARD_OPTIONS.map(o => o.id);
 
 const GOOGLE_TYPES: GoogleType[] = ['SEARCH', 'DEMAND_GEN', 'PERFORMANCE_MAX'];
+
+/** Segment 类型：API 返回的数据层级 */
+type SegmentType = 'ad_date' | 'age_date' | 'gender_adset_date' | 'country_campaign_date' | 'asset_group_date' | 'keyword_date' | 'search_term_date';
+/** 透视表 segment 选择模式 */
+type PivotSegmentMode = 'default' | 'age' | 'gender' | 'country' | 'keyword' | 'search_term';
+
+interface SegmentOption {
+  key: SegmentType;
+  label: string;
+  isDefault?: boolean;
+}
+
+/** 获取指定平台/类型的可用 segment 选项 */
+const getSegmentOptions = (platform: 'facebook' | 'google', googleType?: GoogleType): SegmentOption[] => {
+  if (platform === 'facebook') {
+    return [
+      { key: 'ad_date', label: 'Ad Date（默认数据源）', isDefault: true },
+      { key: 'age_date', label: 'Age（年龄）' },
+      { key: 'gender_adset_date', label: 'Gender（性别）' },
+      { key: 'country_campaign_date', label: 'Country（国家）' },
+    ];
+  }
+  if (googleType === 'PERFORMANCE_MAX') {
+    return [
+      { key: 'asset_group_date', label: 'Asset Group Date（默认数据源）', isDefault: true },
+      { key: 'age_date', label: 'Age（年龄）' },
+      { key: 'gender_adset_date', label: 'Gender（性别）' },
+    ];
+  }
+  if (googleType === 'SEARCH') {
+    return [
+      { key: 'ad_date', label: 'Ad Date（默认数据源）', isDefault: true },
+      { key: 'search_term_date', label: 'Search Term（搜索词）' },
+      { key: 'keyword_date', label: 'Keyword（关键词）' },
+      { key: 'gender_adset_date', label: 'Gender（性别）' },
+      { key: 'asset_group_date', label: 'Asset Group（资产组）' },
+      { key: 'age_date', label: 'Age（年龄）' },
+    ];
+  }
+  // DEMAND_GEN
+  return [
+    { key: 'ad_date', label: 'Ad Date（默认数据源）', isDefault: true },
+    { key: 'age_date', label: 'Age（年龄）' },
+    { key: 'gender_adset_date', label: 'Gender（性别）' },
+  ];
+};
+
+/** 获取指定平台/类型的默认 segment */
+const getDefaultSegment = (platform: 'facebook' | 'google', googleType?: GoogleType): SegmentType => {
+  if (platform === 'google' && googleType === 'PERFORMANCE_MAX') return 'asset_group_date';
+  return 'ad_date';
+};
+
+/** 判断一行数据是否属于其平台/类型的默认 segment */
+const isDefaultSegmentRow = (row: { __segments?: string; _platform?: string; _googleType?: string }): boolean => {
+  const seg = (row.__segments || '').toLowerCase();
+  if (row._platform === 'google' && row._googleType === 'PERFORMANCE_MAX') {
+    return seg === 'asset_group_date';
+  }
+  return seg === 'ad_date';
+};
+
+/** 透视表 segment 模式映射到实际 segment 值 */
+const PIVOT_SEGMENT_MODE_MAP: Record<Exclude<PivotSegmentMode, 'default'>, SegmentType> = {
+  age: 'age_date',
+  gender: 'gender_adset_date',
+  country: 'country_campaign_date',
+  keyword: 'keyword_date',
+  search_term: 'search_term_date',
+};
+
+const PIVOT_SEGMENT_MODE_OPTIONS: Array<{ key: PivotSegmentMode; label: string }> = [
+  { key: 'default', label: '默认数据源' },
+  { key: 'age', label: 'Age（年龄）' },
+  { key: 'gender', label: 'Gender（性别）' },
+  { key: 'country', label: 'Country（国家，仅 Meta）' },
+  { key: 'keyword', label: 'Keyword（关键词，仅 Google Search）' },
+  { key: 'search_term', label: 'Search Term（搜索词，仅 Google Search）' },
+];
+
 const PIVOT_PLATFORM_OPTIONS: Array<{ key: PivotPlatformScope; label: string }> = [
   { key: 'meta', label: 'Meta' },
   { key: 'google_search', label: 'Google Search' },
   { key: 'google_demand_gen', label: 'Google Demand Gen' },
   { key: 'google_performance_max', label: 'Google Performance Max' },
 ];
+
+/** Segment 模式对应允许的平台范围；未列出的 segment 表示所有平台均可选 */
+const SEGMENT_ALLOWED_PLATFORMS: Partial<Record<PivotSegmentMode, PivotPlatformScope[]>> = {
+  country: ['meta'],
+  keyword: ['google_search'],
+  search_term: ['google_search'],
+};
 const DEFAULT_PIVOT_PLATFORM_SCOPES: PivotPlatformScope[] = PIVOT_PLATFORM_OPTIONS.map(o => o.key);
 
 const BASE_METRICS = [
-  'cost', 'leads', 'impressions', 'reach', 'clicks', 'linkClicks',
-  'conversionValue', 'conversion', 'addToCart',
-  'landingPageViews', 'checkout', 'subscribe'
+  // 核心效果指标（通用 - 所有平台）
+  'cost', 'impressions', 'reach', 'clicks', 'linkClicks',
+  // 转化指标（通用 - 所有平台）
+  'conversionValue', 'conversion', 'addToCart', 'landingPageViews',
+  // Meta 互动与转化（仅 Meta 数据有值）
+  'leads', 'checkout', 'subscribe', 'addsPaymentInfo',
+  // Meta 视频与社交（仅 Meta 数据有值）
+  'videoViews', 'postComments', 'postReactions', 'postSaves', 'postShares',
 ];
 
 const OPERATORS = ['(', ')', '+', '-', '*', '/', '1000', '100'];
+
+/** API 转换后的 raw 行中通用指标列名（当 mapping 为空时用于 Google 等平台取数，与 api-service transformApiDataToRawData 一致） */
+const FALLBACK_METRIC_COLUMNS: Record<string, string> = {
+  cost: 'Spend',
+  impressions: 'Impressions',
+  reach: 'Reach',
+  clicks: 'Clicks (all)',
+  linkClicks: 'Link clicks',
+  conversionValue: 'Purchases conversion value',
+  conversion: 'Purchases',
+  addToCart: 'Add to Cart',
+  landingPageViews: 'Landing page views',
+};
+
+/** 指标字段分类定义 */
+interface MetricCategoryDef { label: string; keys: string[] }
+
+/** 所有平台共有的基础字段分类 */
+const COMMON_METRIC_CATEGORIES: MetricCategoryDef[] = [
+  { label: '基础维度', keys: ['campaign', 'adSet', 'ad', 'date'] },
+  { label: '核心效果指标', keys: ['cost', 'impressions', 'reach', 'clicks', 'linkClicks'] },
+  { label: '转化指标', keys: ['conversionValue', 'conversion', 'addToCart', 'landingPageViews'] },
+];
+
+/** 各平台/类型特有的字段分类 */
+const PLATFORM_SPECIFIC_CATEGORIES: Record<string, MetricCategoryDef[]> = {
+  facebook: [
+    { label: 'Meta 互动与转化', keys: ['leads', 'checkout', 'subscribe', 'addsPaymentInfo', 'costPerAddPaymentInfo'] },
+    { label: 'Meta 视频与社交', keys: ['videoViews', 'postComments', 'postReactions', 'postSaves', 'postShares'] },
+    { label: 'Meta 广告信息', keys: ['country', 'headline', 'linkUrl'] },
+  ],
+  google_SEARCH: [
+    { label: 'Search 关键词', keys: ['keyword', 'searchTerm'] },
+  ],
+  google_DEMAND_GEN: [
+    { label: 'DG 广告属性', keys: ['adStatus', 'adType', 'devicePreference'] },
+    { label: 'DG 标题与文案', keys: ['headline', 'longHeadline', 'descriptions', 'businessName'] },
+    { label: 'DG 素材资源', keys: ['squareImageIds', 'portraitImageIds', 'logoImageIds', 'landscapeImageIds', 'videoIds'] },
+    { label: 'DG CTA 与 URL', keys: ['callToActionText', 'callToActionHeadline', 'appFinalUrl', 'displayUrl', 'trackingUrlTemplate', 'finalUrlSuffix', 'customerParam'] },
+  ],
+  google_PERFORMANCE_MAX: [],
+};
+
+/** 获取当前平台/类型的全部指标分类（共有 + 平台特有） */
+const getMetricCategories = (platform: 'facebook' | 'google', googleType?: GoogleType): MetricCategoryDef[] => {
+  const key = platform === 'facebook' ? 'facebook' : `google_${googleType || 'PERFORMANCE_MAX'}`;
+  return [...COMMON_METRIC_CATEGORIES, ...(PLATFORM_SPECIFIC_CATEGORIES[key] || [])];
+};
+
+/** Meta 特有指标集合（用于公式平台归属判定） */
+const META_ONLY_METRIC_KEYS = new Set([
+  'leads', 'checkout', 'subscribe', 'addsPaymentInfo', 'costPerAddPaymentInfo',
+  'videoViews', 'postComments', 'postReactions', 'postSaves', 'postShares',
+]);
+
+/** 根据公式引用的指标自动判定适用平台范围 */
+const inferFormulaPlatformScope = (formula: string): string => {
+  const used = BASE_METRICS.filter(m => new RegExp(`\\b${m}\\b`).test(formula));
+  if (used.some(m => META_ONLY_METRIC_KEYS.has(m))) return 'Meta';
+  return '通用';
+};
+
+/** 公式弹窗内基础指标的分类（按平台归属分组展示，不含非可加指标） */
+const FORMULA_METRIC_CATEGORIES: MetricCategoryDef[] = [
+  { label: '核心效果指标', keys: ['cost', 'impressions', 'reach', 'clicks', 'linkClicks'] },
+  { label: '转化指标', keys: ['conversionValue', 'conversion', 'addToCart', 'landingPageViews'] },
+  { label: 'Meta 互动与转化', keys: ['leads', 'checkout', 'subscribe', 'addsPaymentInfo'] },
+  { label: 'Meta 视频与社交', keys: ['videoViews', 'postComments', 'postReactions', 'postSaves', 'postShares'] },
+];
+
+/** 各平台映射字段默认值模板（空字符串表示未映射） */
+const MAPPING_TEMPLATE_FACEBOOK: MappingConfig = {
+  campaign: '', adSet: '', ad: '', date: '',
+  cost: '', impressions: '', reach: '', clicks: '', linkClicks: '',
+  conversionValue: '', conversion: '', addToCart: '', landingPageViews: '',
+  leads: '', checkout: '', subscribe: '', addsPaymentInfo: '', costPerAddPaymentInfo: '',
+  videoViews: '', postComments: '', postReactions: '', postSaves: '', postShares: '',
+  country: '', headline: '', linkUrl: '',
+};
+const MAPPING_TEMPLATE_SEARCH: MappingConfig = {
+  campaign: '', adSet: '', ad: '', date: '',
+  cost: '', impressions: '', reach: '', clicks: '', linkClicks: '',
+  conversionValue: '', conversion: '', addToCart: '', landingPageViews: '',
+  keyword: '', searchTerm: '',
+};
+const MAPPING_TEMPLATE_DEMAND_GEN: MappingConfig = {
+  campaign: '', adSet: '', ad: '', date: '',
+  cost: '', impressions: '', reach: '', clicks: '', linkClicks: '',
+  conversionValue: '', conversion: '', addToCart: '', landingPageViews: '',
+  adStatus: '', adType: '', devicePreference: '', headline: '', longHeadline: '', descriptions: '', businessName: '',
+  squareImageIds: '', portraitImageIds: '', logoImageIds: '', landscapeImageIds: '', videoIds: '',
+  callToActionText: '', callToActionHeadline: '', appFinalUrl: '', displayUrl: '', trackingUrlTemplate: '', finalUrlSuffix: '', customerParam: '',
+};
+const MAPPING_TEMPLATE_PMAX: MappingConfig = {
+  campaign: '', adSet: '', ad: '', date: '',
+  cost: '', impressions: '', reach: '', clicks: '', linkClicks: '',
+  conversionValue: '', conversion: '', addToCart: '', landingPageViews: '',
+};
 
 // MOCK_PROJECTS 已由 API 替代
 const MOCK_ACCOUNTS: { id: string; name: string; type: string }[] = [];
 
 const DEFAULT_FORMULAS: FormulaField[] = [
+  // ── 通用公式（所有平台适用，依赖指标：cost, impressions, reach, clicks, linkClicks, conversion, conversionValue, addToCart）──
   { id: 'f_cpm', name: 'CPM', formula: '(cost / impressions) * 1000', unit: '$', isDefault: true },
   { id: 'f_cpc', name: 'CPC', formula: 'cost / linkClicks', unit: '$', isDefault: true },
   { id: 'f_ctr', name: 'CTR', formula: 'linkClicks / impressions', unit: '%', isDefault: true },
@@ -259,6 +453,8 @@ const DEFAULT_FORMULAS: FormulaField[] = [
   { id: 'f_freq', name: 'Frequency', formula: 'impressions / reach', unit: '', isDefault: true },
   { id: 'f_aov', name: 'AOV', formula: 'conversionValue / conversion', unit: '$', isDefault: true },
   { id: 'f_roi', name: 'ROI', formula: 'conversionValue / cost', unit: '', isDefault: true },
+  // ── Meta 特有公式（依赖 Meta 独有指标：leads, checkout, subscribe）──
+  { id: 'f_cpl', name: 'CPL', formula: 'cost / leads', unit: '$', isDefault: true },
   { id: 'f_cpc_checkout', name: 'Cost per checkout', formula: 'cost / checkout', unit: '$', isDefault: true },
   { id: 'f_cps', name: 'Cost per subscription', formula: 'cost / subscribe', unit: '$', isDefault: true },
 ];
@@ -323,7 +519,7 @@ const normalizeDimConfigs = (input: any): DimensionConfig[] => {
   }
   if (!Array.isArray(data)) return [];
   const allowedSources = new Set([
-    'campaign', 'adSet', 'ad', 'platform', 'age', 'gender',
+    'campaign', 'adSet', 'ad', 'platform', 'age', 'gender', 'country',
     ...ALL_COLUMN_SOURCES,
   ]);
   return data
@@ -406,23 +602,11 @@ const App = () => {
     setFormulas(DEFAULT_FORMULAS);
     setCustomMetricLabels({});
     setMappings({
-      facebook: {
-        campaign: '', adSet: '', ad: '', cost: '', leads: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
-        conversionValue: '', conversion: '', addToCart: '', landingPageViews: '', checkout: '', subscribe: ''
-      },
+      facebook: { ...MAPPING_TEMPLATE_FACEBOOK },
       google: {
-        SEARCH: {
-          campaign: '', adSet: '', ad: '', cost: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
-          conversionValue: '', conversion: '', addToCart: '', landingPageViews: ''
-        },
-        DEMAND_GEN: {
-          campaign: '', adSet: '', ad: '', cost: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
-          conversionValue: '', conversion: '', addToCart: '', landingPageViews: ''
-        },
-        PERFORMANCE_MAX: {
-          campaign: '', adSet: '', ad: '', cost: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
-          conversionValue: '', conversion: '', addToCart: '', landingPageViews: ''
-        }
+        SEARCH: { ...MAPPING_TEMPLATE_SEARCH },
+        DEMAND_GEN: { ...MAPPING_TEMPLATE_DEMAND_GEN },
+        PERFORMANCE_MAX: { ...MAPPING_TEMPLATE_PMAX },
       }
     });
   };
@@ -446,6 +630,8 @@ const App = () => {
 
   // API Loading States
   const [isLoadingData, setIsLoadingData] = useState(false);
+  /** 仅点击「获取广告数据」时为 true，用于全屏加载；选项目/拉配置等不显示全屏 */
+  const [isFetchingAdData, setIsFetchingAdData] = useState(false);
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(false);
   const [apiError, setApiError] = useState<string>('');
@@ -478,6 +664,8 @@ const App = () => {
   const [dashboardPlatformFilter, setDashboardPlatformFilter] = useState<'all' | 'facebook' | 'google'>('all');
   const [activePlatformTab, setActivePlatformTab] = useState<'facebook' | 'google'>('facebook');
   const [activeGoogleType, setActiveGoogleType] = useState<GoogleType>('SEARCH');
+  /** 当前选中的 segment（指标对齐/维度配置页用） */
+  const [activeSegment, setActiveSegment] = useState<SegmentType>('ad_date');
 
   const [customMetricLabels, setCustomMetricLabels] = useState<Record<string, string>>({});
   const [newMetricName, setNewMetricName] = useState('');
@@ -493,6 +681,40 @@ const App = () => {
       landingPageViews: 'Landing Page Views',
       checkout: 'Checkouts',
       subscribe: 'Subscriptions',
+      // Meta 新增
+      country: 'Country',
+      addsPaymentInfo: 'Adds of payment info',
+      costPerAddPaymentInfo: 'Cost per add of payment info',
+      linkUrl: 'Link (ad settings)',
+      headline: 'Headline',
+      // Google Search 新增
+      keyword: 'Search keyword',
+      searchTerm: 'Search term',
+      // Meta 视频与社交
+      videoViews: 'Video views',
+      postComments: 'Post comments',
+      postReactions: 'Post reactions',
+      postSaves: 'Post saves',
+      postShares: 'Post shares',
+      // Google Demand Gen 新增
+      adStatus: 'Ad status',
+      adType: 'Ad type',
+      devicePreference: 'Device preference',
+      longHeadline: 'Long headline',
+      descriptions: 'Description',
+      businessName: 'Business name',
+      squareImageIds: 'Square image ID',
+      portraitImageIds: 'Portrait image ID',
+      logoImageIds: 'Logo ID',
+      landscapeImageIds: 'Landscape image ID',
+      videoIds: 'Video ID',
+      callToActionText: 'Call to action text',
+      callToActionHeadline: 'Call to action headline',
+      appFinalUrl: 'Mobile final URL',
+      displayUrl: 'Display URL',
+      trackingUrlTemplate: 'Tracking template',
+      finalUrlSuffix: 'Final URL suffix',
+      customerParam: 'Custom parameter',
       ...customMetricLabels
     };
     return labels[key] || key;
@@ -525,6 +747,9 @@ const App = () => {
   };
 
   const inferGoogleTypeFromRow = (row: RawDataRow): GoogleType => {
+    // keyword_date / search_term_date 是 Google Search 独有 segment，直接返回 SEARCH
+    const seg = (row.__segments || '').toLowerCase();
+    if (seg === 'keyword_date' || seg === 'search_term_date') return 'SEARCH';
     const candidate = row.__campaignAdvertisingType
       || row['campaignAdvertisingType']
       || row['campaign_advertising_type']
@@ -572,15 +797,16 @@ const App = () => {
 
   const migrateMappings = (data: any) => {
     if (!data || typeof data !== 'object') return mappings;
-    const facebook = stripPlatformKey(data.facebook || {});
+    // 合并模板默认值，确保新增字段在旧配置中也存在
+    const facebook = { ...MAPPING_TEMPLATE_FACEBOOK, ...stripPlatformKey(data.facebook || {}) };
 
     if (data.google && (data.google.SEARCH || data.google.DEMAND_GEN || data.google.PERFORMANCE_MAX)) {
       return {
         facebook,
         google: {
-          SEARCH: stripPlatformKey(data.google.SEARCH || {}),
-          DEMAND_GEN: stripPlatformKey(data.google.DEMAND_GEN || {}),
-          PERFORMANCE_MAX: stripPlatformKey(data.google.PERFORMANCE_MAX || {})
+          SEARCH: { ...MAPPING_TEMPLATE_SEARCH, ...stripPlatformKey(data.google.SEARCH || {}) },
+          DEMAND_GEN: { ...MAPPING_TEMPLATE_DEMAND_GEN, ...stripPlatformKey(data.google.DEMAND_GEN || {}) },
+          PERFORMANCE_MAX: { ...MAPPING_TEMPLATE_PMAX, ...stripPlatformKey(data.google.PERFORMANCE_MAX || {}) }
         }
       };
     }
@@ -589,9 +815,9 @@ const App = () => {
     return {
       facebook,
       google: {
-        SEARCH: { ...legacyGoogle },
-        DEMAND_GEN: { ...legacyGoogle },
-        PERFORMANCE_MAX: { ...legacyGoogle }
+        SEARCH: { ...MAPPING_TEMPLATE_SEARCH, ...legacyGoogle },
+        DEMAND_GEN: { ...MAPPING_TEMPLATE_DEMAND_GEN, ...legacyGoogle },
+        PERFORMANCE_MAX: { ...MAPPING_TEMPLATE_PMAX, ...legacyGoogle }
       }
     };
   };
@@ -600,23 +826,11 @@ const App = () => {
     facebook: MappingConfig;
     google: Record<GoogleType, MappingConfig>;
   }>({
-    facebook: {
-      campaign: '', adSet: '', ad: '', cost: '', leads: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
-      conversionValue: '', conversion: '', addToCart: '', landingPageViews: '', checkout: '', subscribe: ''
-    },
+    facebook: { ...MAPPING_TEMPLATE_FACEBOOK },
     google: {
-      SEARCH: {
-        campaign: '', adSet: '', ad: '', cost: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
-        conversionValue: '', conversion: '', addToCart: '', landingPageViews: ''
-      },
-      DEMAND_GEN: {
-        campaign: '', adSet: '', ad: '', cost: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
-        conversionValue: '', conversion: '', addToCart: '', landingPageViews: ''
-      },
-      PERFORMANCE_MAX: {
-        campaign: '', adSet: '', ad: '', cost: '', impressions: '', reach: '', clicks: '', linkClicks: '', date: '',
-        conversionValue: '', conversion: '', addToCart: '', landingPageViews: ''
-      }
+      SEARCH: { ...MAPPING_TEMPLATE_SEARCH },
+      DEMAND_GEN: { ...MAPPING_TEMPLATE_DEMAND_GEN },
+      PERFORMANCE_MAX: { ...MAPPING_TEMPLATE_PMAX },
     }
   });
 
@@ -682,6 +896,11 @@ const App = () => {
   const [dimValueSearch, setDimValueSearch] = useState('');
   // 报告面板 Tab：bi | pivot | ai
   const [activeReportTab, setActiveReportTab] = useState<'bi' | 'pivot' | 'ai'>('bi');
+  // 源数据查看器
+  const [isRawDataViewerOpen, setIsRawDataViewerOpen] = useState(false);
+  const [rawDataSearch, setRawDataSearch] = useState('');
+  const [rawDataPage, setRawDataPage] = useState(0);
+  const [rawDataPlatformFilter, setRawDataPlatformFilter] = useState<'all' | 'facebook' | 'google'>('all');
   // 数据透视配置
   const [pivotFilters, setPivotFilters] = useState<Array<{
     id: string;
@@ -697,6 +916,8 @@ const App = () => {
   const [pivotColumns, setPivotColumns] = useState<string[]>(() => []);
   const [pivotValues, setPivotValues] = useState<string[]>(() => ['cost']);
   const [pivotPlatformScopes, setPivotPlatformScopes] = useState<PivotPlatformScope[]>(DEFAULT_PIVOT_PLATFORM_SCOPES);
+  /** 透视表 segment 模式：default=各平台默认, age/gender/country=切换到对应 segment */
+  const [pivotSegmentMode, setPivotSegmentMode] = useState<PivotSegmentMode>('default');
   const [pivotDisplay, setPivotDisplay] = useState({
     showSubtotal: false,
     showGrandTotal: true,
@@ -718,6 +939,11 @@ const App = () => {
   const [activePivotPresetId, setActivePivotPresetId] = useState<string | null>(null);
   /** 更新当前报告设置完成后的弱提示 */
   const [pivotUpdateHintVisible, setPivotUpdateHintVisible] = useState(false);
+
+  // 切换平台/Google 类型时自动重置 segment 到默认值
+  useEffect(() => {
+    setActiveSegment(getDefaultSegment(activePlatformTab, activeGoogleType));
+  }, [activePlatformTab, activeGoogleType]);
 
   const dashboardRef = useRef<HTMLDivElement>(null);
   const metricDropdownRef = useRef<HTMLDivElement>(null);
@@ -826,9 +1052,9 @@ const App = () => {
             const fromConfig = mergedDimConfigs.map(d => d.label).filter(Boolean);
             const allLabels = Array.from(new Set([...fromConfig, ...INITIAL_DIMENSIONS]));
             // 默认顺序：Campaign / Ad Set / Ad / Gender / Age 在前，国家在 Age 下方，其余按 INITIAL_DIMENSIONS
-            const orderIndex = new Map(INITIAL_DIMENSIONS.map((d, i) => [d, i]));
-            const atEnd = allLabels.filter(d => !orderIndex.has(d));
-            const ordered = allLabels.filter(d => orderIndex.has(d)).sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
+            const orderIndex = new Map<string, number>(INITIAL_DIMENSIONS.map((d, i) => [d, i]));
+            const atEnd = allLabels.filter((d: string) => !orderIndex.has(d));
+            const ordered = allLabels.filter((d: string) => orderIndex.has(d)).sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
             return [...ordered, ...atEnd];
           });
           if (normalizedDimConfigs.length > 0) console.log('Loaded dimension configs from cloud');
@@ -1038,6 +1264,17 @@ const App = () => {
       : mappings.google[activeGoogleType];
     const sampleRow = rawData.find(row => {
       const platform = inferPlatformFromRow(row);
+      if (activePlatformTab === 'facebook') {
+        if (platform !== 'facebook') return false;
+      } else {
+        if (platform !== 'google') return false;
+        if (inferGoogleTypeFromRow(row) !== activeGoogleType) return false;
+      }
+      // 匹配当前选中的 segment
+      const seg = (row.__segments || '').toLowerCase();
+      return seg === activeSegment;
+    }) || rawData.find(row => {
+      const platform = inferPlatformFromRow(row);
       if (activePlatformTab === 'facebook') return platform === 'facebook';
       if (platform !== 'google') return false;
       return inferGoogleTypeFromRow(row) === activeGoogleType;
@@ -1047,15 +1284,17 @@ const App = () => {
       const colName = getColumnNameForSource(source as ColumnSource);
       colSamples[source] = String(sampleRow[colName] ?? '').trim();
     });
+    const countrySample = activePlatformTab === 'facebook' ? String(sampleRow[curMap.country] || '').trim() : '';
     return {
       campaign: String(sampleRow[curMap.campaign] || ''),
       adSet: String(sampleRow[curMap.adSet] || ''),
       ad: String(sampleRow[curMap.ad] || ''),
       age: String(sampleRow[curMap.age] || ''),
       gender: String(sampleRow[curMap.gender] || ''),
+      country: countrySample,
       ...colSamples,
     };
-  }, [rawData, mappings, activePlatformTab, activeGoogleType]);
+  }, [rawData, mappings, activePlatformTab, activeGoogleType, activeSegment]);
 
   const activeMapping = activePlatformTab === 'facebook'
     ? mappings.facebook
@@ -1079,7 +1318,7 @@ const App = () => {
       const context: Record<string, number> = {};
       Object.keys(curMap).forEach(key => {
         if (['campaign', 'adSet', 'ad', 'date'].includes(key)) return;
-        const colName = (curMap as any)[key];
+        const colName = (curMap as any)[key] || FALLBACK_METRIC_COLUMNS[key];
         context[key] = colName ? parseMetricValue(row[colName]) : 0;
       });
 
@@ -1113,6 +1352,9 @@ const App = () => {
           const sourceCol = curMap[conf.source] || (conf.source === 'age' ? 'Age' : 'Gender');
           const sourceVal = String(row[sourceCol] ?? row[conf.source === 'age' ? 'Age' : 'Gender'] ?? '');
           dims[conf.label] = sourceVal || 'N/A';
+        } else if (conf.source === 'country') {
+          const sourceCol = curMap.country || 'Country';
+          dims[conf.label] = platformValue === 'facebook' ? (String(row[sourceCol] ?? '').trim() || 'N/A') : 'N/A';
         } else {
           const sourceCol = curMap[conf.source as keyof MappingConfig];
           const sourceVal = String(row[sourceCol] || '');
@@ -1185,28 +1427,63 @@ const App = () => {
     [dimConfigs]
   );
 
-  /** Meta 行层级：Campaign 层级 = Ad Set / Ad 均为空；Ad Set 层级 = Ad 为空且 Ad Set 非空；Ad 层级 = Ad 非空 */
-  const isMetaRow = (row: { _platform?: string }) => row._platform === 'facebook';
-  const isCampaignLevelRow = (row: { _dims?: Record<string, string> }) =>
-    (row._dims?.['Ad Set'] || 'N/A') === 'N/A' && (row._dims?.['Ad'] || 'N/A') === 'N/A';
-  const isAdSetLevelRow = (row: { _dims?: Record<string, string> }) =>
-    (row._dims?.['Ad'] || 'N/A') === 'N/A' && (row._dims?.['Ad Set'] || 'N/A') !== 'N/A';
-  const isAdLevelRow = (row: { _dims?: Record<string, string> }) =>
-    (row._dims?.['Ad'] || 'N/A') !== 'N/A';
-
-  /** 行是否落入某维度的数据源（Meta：age=Campaign 层级，gender=Ad Set 层级，其他=Ad 层级；列维度=该平台/类型下全部行） */
+  /**
+   * 行是否落入某维度的数据源（基于 segment 匹配）
+   * - country → Meta 平台 segment=country_campaign_date
+   * - age → Meta+Google 各类型 segment=age_date
+   * - gender → Meta+Google 各类型 segment=gender_adset_date
+   * - searchKeyword → Google Search segment=keyword_date
+   * - searchTerm → Google Search segment=search_term_date
+   * - Demand Gen 列维度 → Google Demand Gen segment=ad_date
+   * - 命名规范来源 (campaign/adSet/ad/platform) → 各平台默认 segment（ad_date / asset_group_date）
+   */
   const isInDimensionDataSource = (row: any, source: string): boolean => {
+    const seg = (row.__segments || '').toLowerCase();
+
+    // country → 仅 Meta 平台 country_campaign_date segment
+    if (source === 'country') {
+      return row._platform === 'facebook' && seg === 'country_campaign_date';
+    }
+
+    // age → 所有平台 age_date segment
+    if (source === 'age') {
+      return seg === 'age_date';
+    }
+
+    // gender → 所有平台 gender_adset_date segment
+    if (source === 'gender') {
+      return seg === 'gender_adset_date';
+    }
+
+    // 列维度来源：按 scope + 特定 segment 匹配
     if (ALL_COLUMN_SOURCES.includes(source as ColumnSource)) {
       const scope = COLUMN_SOURCE_TO_SCOPE[source as ColumnSource];
-      if (scope === 'meta') return row._platform === 'facebook';
-      if (scope === 'google_search') return row._platform === 'google' && row._googleType === 'SEARCH';
-      if (scope === 'google_demand_gen') return row._platform === 'google' && row._googleType === 'DEMAND_GEN';
+
+      if (scope === 'google_search') {
+        // searchKeyword → keyword_date segment；searchTerm → search_term_date segment
+        if (source === 'searchKeyword') return row._platform === 'google' && row._googleType === 'SEARCH' && seg === 'keyword_date';
+        if (source === 'searchTerm') return row._platform === 'google' && row._googleType === 'SEARCH' && seg === 'search_term_date';
+        // 其他 Google Search 列维度（如有）→ ad_date
+        return row._platform === 'google' && row._googleType === 'SEARCH' && seg === 'ad_date';
+      }
+
+      if (scope === 'google_demand_gen') {
+        // Demand Gen 所有列维度 → ad_date segment
+        return row._platform === 'google' && row._googleType === 'DEMAND_GEN' && seg === 'ad_date';
+      }
+
+      if (scope === 'meta') {
+        return row._platform === 'facebook' && seg === 'ad_date';
+      }
+
       return false;
     }
-    if (!isMetaRow(row)) return true;
-    if (source === 'age') return isCampaignLevelRow(row);
-    if (source === 'gender') return isAdSetLevelRow(row);
-    return isAdLevelRow(row);
+
+    // 命名规范来源（campaign / adSet / ad / platform）→ 使用各平台默认 segment
+    if (row._platform === 'google' && row._googleType === 'PERFORMANCE_MAX') {
+      return seg === 'asset_group_date';
+    }
+    return seg === 'ad_date';
   };
 
   // Auto-select first dimension when configs change
@@ -1219,7 +1496,7 @@ const App = () => {
     }
   }, [qualityDimensionLabels, selectedQualityDimension]);
 
-  // Overall quality stats（Meta：age 仅看 campaign 层级，gender 仅看 ad set 层级，其他维度仅看 ad name 非空；非 Meta 全量）
+  // Overall quality stats（基于 segment 匹配：各维度仅统计其对应 segment 内的行数据）
   const qualityStats = useMemo(() => {
     const total = baseProcessedData.length;
     if (!total || qualityDimensionLabels.length === 0) {
@@ -1241,7 +1518,7 @@ const App = () => {
     return { total, matched, unmatched, matchRate };
   }, [baseProcessedData, qualityDimensionLabels, dimConfigs]);
 
-  // Per-dimension match stats（Meta：age 数据源=campaign 层级，gender=ad set 层级，其他=ad name 非空；非 Meta 全量）
+  // Per-dimension match stats（基于 segment 匹配：各维度仅统计其对应 segment 内的行数据）
   const dimensionMatchStats = useMemo(() => {
     if (qualityDimensionLabels.length === 0 || baseProcessedData.length === 0) return [];
 
@@ -1342,7 +1619,8 @@ const App = () => {
     const daily: Record<string, any> = {};
     const baseKeys = [...BASE_METRICS, ...Object.keys(customMetricLabels)];
 
-    filteredData.forEach(row => {
+    // 仅使用默认 segment 行，避免 age/gender/country 等拆分行导致重复累加
+    filteredData.filter(isDefaultSegmentRow).forEach(row => {
       const d = row._date;
       if (!daily[d]) {
         daily[d] = { _date: d };
@@ -1368,7 +1646,8 @@ const App = () => {
     const groups: Record<string, any> = {};
     const baseKeys = [...BASE_METRICS, ...Object.keys(customMetricLabels)];
 
-    filteredData.forEach(row => {
+    // 仅使用默认 segment 行，避免重复累加
+    filteredData.filter(isDefaultSegmentRow).forEach(row => {
       const key = row._dims[dimName] || 'Other';
       if (!groups[key]) {
         groups[key] = { label: key };
@@ -1437,22 +1716,41 @@ const App = () => {
   const pivotPlatformScopedData = useMemo(() => {
     if (pivotPlatformScopes.length === 0) return [];
     const scopeSet = new Set(pivotPlatformScopes);
+
+    /** 根据 pivotSegmentMode 判断行是否属于目标 segment */
+    const matchesSegment = (row: any): boolean => {
+      const seg = (row.__segments || '').toLowerCase();
+      if (pivotSegmentMode === 'default') {
+        return isDefaultSegmentRow(row);
+      }
+      const targetSeg = PIVOT_SEGMENT_MODE_MAP[pivotSegmentMode];
+      // Country segment 仅 Meta 有
+      if (pivotSegmentMode === 'country' && row._platform !== 'facebook') {
+        return isDefaultSegmentRow(row);
+      }
+      // Keyword / Search Term segment 仅 Google Search 有
+      if ((pivotSegmentMode === 'keyword' || pivotSegmentMode === 'search_term') &&
+          !(row._platform === 'google' && row._googleType === 'SEARCH')) {
+        return isDefaultSegmentRow(row);
+      }
+      return seg === targetSeg;
+    };
+
     return filteredData.filter(row => {
       if (row._platform === 'facebook') {
         if (!scopeSet.has('meta')) return false;
-        // Meta 透视表默认仅使用 Ad 层级数据，避免与 age_date/gender_adset_date 混算导致重复或 N/A
-        if ((row._dims?.['Ad'] || 'N/A') === 'N/A') return false;
-        return true;
+        return matchesSegment(row);
       }
       if (row._platform === 'google') {
         const gType: GoogleType = row._googleType || 'PERFORMANCE_MAX';
-        if (gType === 'SEARCH') return scopeSet.has('google_search');
-        if (gType === 'DEMAND_GEN') return scopeSet.has('google_demand_gen');
-        return scopeSet.has('google_performance_max');
+        if (gType === 'SEARCH' && !scopeSet.has('google_search')) return false;
+        if (gType === 'DEMAND_GEN' && !scopeSet.has('google_demand_gen')) return false;
+        if (gType === 'PERFORMANCE_MAX' && !scopeSet.has('google_performance_max')) return false;
+        return matchesSegment(row);
       }
       return pivotPlatformScopes.length === DEFAULT_PIVOT_PLATFORM_SCOPES.length;
     });
-  }, [filteredData, pivotPlatformScopes]);
+  }, [filteredData, pivotPlatformScopes, pivotSegmentMode]);
 
   const pivotDimensionValueOptions = useMemo(() => {
     const sets: Record<string, Set<string>> = {};
@@ -1747,7 +2045,7 @@ const App = () => {
       linkClicks: pick(hdrs, ['link clicks', 'clicks'], existing.linkClicks),
       date: pick(hdrs, ['day', 'date'], existing.date),
       conversionValue: pick(hdrs, ['conversion value', 'purchase value', 'conversionvalue'], existing.conversionValue),
-      conversion: pick(hdrs, ['conversion', 'conversions', 'purchases', 'purchase'], existing.conversion),
+      conversion: pick(hdrs, ['purchases', 'purchase', 'conversion', 'conversions'], existing.conversion),
       addToCart: pick(hdrs, ['add to cart', 'atc', 'addtocart'], existing.addToCart),
       landingPageViews: pick(hdrs, ['landing page views', 'landingpageviews'], existing.landingPageViews),
     });
@@ -1755,14 +2053,58 @@ const App = () => {
     const baseFacebook = buildBaseMapping(hdrsBySource.facebook, mappings.facebook);
     const facebookMapping: MappingConfig = {
       ...baseFacebook,
+      // Meta 互动与转化
       leads: pick(hdrsBySource.facebook, ['leads', 'results'], mappings.facebook.leads),
-      checkout: pick(hdrsBySource.facebook, ['checkout', 'checkouts'], mappings.facebook.checkout),
+      checkout: pick(hdrsBySource.facebook, ['checkout', 'checkouts', 'checkouts initiated'], mappings.facebook.checkout),
       subscribe: pick(hdrsBySource.facebook, ['subscribe', 'subscription', 'subscriptions'], mappings.facebook.subscribe),
+      addsPaymentInfo: pick(hdrsBySource.facebook, ['adds of payment info', 'addspaymentinfo', 'adds payment info'], mappings.facebook.addsPaymentInfo),
+      costPerAddPaymentInfo: pick(hdrsBySource.facebook, ['cost per add of payment info', 'costperaddpaymentinfo', 'cost per adds payment'], mappings.facebook.costPerAddPaymentInfo),
+      // Meta 视频与社交
+      videoViews: pick(hdrsBySource.facebook, ['video views', 'videoviews', 'video view'], mappings.facebook.videoViews),
+      postComments: pick(hdrsBySource.facebook, ['post comments', 'postcomments', 'comments'], mappings.facebook.postComments),
+      postReactions: pick(hdrsBySource.facebook, ['post reactions', 'postreactions', 'reactions'], mappings.facebook.postReactions),
+      postSaves: pick(hdrsBySource.facebook, ['post saves', 'postsaves', 'saves'], mappings.facebook.postSaves),
+      postShares: pick(hdrsBySource.facebook, ['post shares', 'postshares', 'shares'], mappings.facebook.postShares),
+      // Meta 广告信息
+      country: pick(hdrsBySource.facebook, ['country'], mappings.facebook.country),
+      headline: pick(hdrsBySource.facebook, ['headline'], mappings.facebook.headline),
+      linkUrl: pick(hdrsBySource.facebook, ['link (ad settings)', 'link url', 'linkurl'], mappings.facebook.linkUrl),
+    };
+
+    const baseSearch = buildBaseMapping(hdrsBySource.google.SEARCH, mappings.google.SEARCH);
+    const searchMapping: MappingConfig = {
+      ...baseSearch,
+      keyword: pick(hdrsBySource.google.SEARCH, ['search keyword', 'keyword'], mappings.google.SEARCH.keyword),
+      searchTerm: pick(hdrsBySource.google.SEARCH, ['search term', 'searchterm'], mappings.google.SEARCH.searchTerm),
+    };
+
+    const baseDemandGen = buildBaseMapping(hdrsBySource.google.DEMAND_GEN, mappings.google.DEMAND_GEN);
+    const demandGenMapping: MappingConfig = {
+      ...baseDemandGen,
+      adStatus: pick(hdrsBySource.google.DEMAND_GEN, ['ad status', 'adstatus'], mappings.google.DEMAND_GEN.adStatus),
+      adType: pick(hdrsBySource.google.DEMAND_GEN, ['ad type', 'adtype'], mappings.google.DEMAND_GEN.adType),
+      devicePreference: pick(hdrsBySource.google.DEMAND_GEN, ['device preference', 'devicepreference'], mappings.google.DEMAND_GEN.devicePreference),
+      headline: pick(hdrsBySource.google.DEMAND_GEN, ['headline'], mappings.google.DEMAND_GEN.headline),
+      longHeadline: pick(hdrsBySource.google.DEMAND_GEN, ['long headline', 'longheadline'], mappings.google.DEMAND_GEN.longHeadline),
+      descriptions: pick(hdrsBySource.google.DEMAND_GEN, ['description', 'descriptions'], mappings.google.DEMAND_GEN.descriptions),
+      businessName: pick(hdrsBySource.google.DEMAND_GEN, ['business name', 'businessname'], mappings.google.DEMAND_GEN.businessName),
+      squareImageIds: pick(hdrsBySource.google.DEMAND_GEN, ['square image id', 'squareimageid'], mappings.google.DEMAND_GEN.squareImageIds),
+      portraitImageIds: pick(hdrsBySource.google.DEMAND_GEN, ['portrait image id', 'portraitimageid'], mappings.google.DEMAND_GEN.portraitImageIds),
+      logoImageIds: pick(hdrsBySource.google.DEMAND_GEN, ['logo id', 'logoimageid'], mappings.google.DEMAND_GEN.logoImageIds),
+      landscapeImageIds: pick(hdrsBySource.google.DEMAND_GEN, ['landscape image id', 'landscapeimageid'], mappings.google.DEMAND_GEN.landscapeImageIds),
+      videoIds: pick(hdrsBySource.google.DEMAND_GEN, ['video id', 'videoids'], mappings.google.DEMAND_GEN.videoIds),
+      callToActionText: pick(hdrsBySource.google.DEMAND_GEN, ['call to action text', 'calltoactiontext'], mappings.google.DEMAND_GEN.callToActionText),
+      callToActionHeadline: pick(hdrsBySource.google.DEMAND_GEN, ['call to action headline', 'calltoactionheadline'], mappings.google.DEMAND_GEN.callToActionHeadline),
+      appFinalUrl: pick(hdrsBySource.google.DEMAND_GEN, ['mobile final url', 'appfinalurl'], mappings.google.DEMAND_GEN.appFinalUrl),
+      displayUrl: pick(hdrsBySource.google.DEMAND_GEN, ['display url', 'displayurl'], mappings.google.DEMAND_GEN.displayUrl),
+      trackingUrlTemplate: pick(hdrsBySource.google.DEMAND_GEN, ['tracking template', 'trackingurltemplate'], mappings.google.DEMAND_GEN.trackingUrlTemplate),
+      finalUrlSuffix: pick(hdrsBySource.google.DEMAND_GEN, ['final url suffix', 'finalurlsuffix'], mappings.google.DEMAND_GEN.finalUrlSuffix),
+      customerParam: pick(hdrsBySource.google.DEMAND_GEN, ['custom parameter', 'customerparam'], mappings.google.DEMAND_GEN.customerParam),
     };
 
     const googleMappingByType: Record<GoogleType, MappingConfig> = {
-      SEARCH: buildBaseMapping(hdrsBySource.google.SEARCH, mappings.google.SEARCH),
-      DEMAND_GEN: buildBaseMapping(hdrsBySource.google.DEMAND_GEN, mappings.google.DEMAND_GEN),
+      SEARCH: searchMapping,
+      DEMAND_GEN: demandGenMapping,
       PERFORMANCE_MAX: buildBaseMapping(hdrsBySource.google.PERFORMANCE_MAX, mappings.google.PERFORMANCE_MAX)
     };
 
@@ -1827,11 +2169,18 @@ const App = () => {
     if (project.adsCostReport) {
       setIsLoadingAccounts(true);
       try {
-        // Fetch accounts for the selected project
+        // 优化：获取账号列表时只查询最近3天的数据，大幅提升响应速度
+        const today = new Date();
+        const quickEndDate = today.toISOString().split('T')[0];
+        const quickStartDate = new Date(today);
+        quickStartDate.setDate(quickStartDate.getDate() - 2); // 最近3天
+        const quickStart = quickStartDate.toISOString().split('T')[0];
+        
+        // Fetch accounts for the selected project using shortened date range
         const apiData = await fetchAllPlatformsData(
           project.projectId,
-          apiDateRange.start,
-          apiDateRange.end,
+          quickStart,
+          quickEndDate,
           undefined // Fetch all accounts for initial list
         );
         const accounts = extractUniqueAccounts(apiData);
@@ -1852,6 +2201,7 @@ const App = () => {
       return;
     }
     setIsLoadingData(true);
+    setIsFetchingAdData(true);
     setApiError('');
 
     try {
@@ -1863,19 +2213,17 @@ const App = () => {
       expandedStartD.setDate(expandedStartD.getDate() - days);
       const expandedStart = expandedStartD.toISOString().split('T')[0];
 
-      const segmentList = ['ad_date', 'age_date', 'gender_adset_date'];
-
       const apiData = await fetchAllPlatformsData(
         selectedProject.projectId,
         expandedStart,
         apiDateRange.end,
-        selectedAccounts.length > 0 ? selectedAccounts : undefined,
-        segmentList
+        selectedAccounts.length > 0 ? selectedAccounts : undefined
       );
 
       if (apiData.length === 0) {
         setApiError('未获取到数据，请检查筛选条件或选择其他日期范围');
         setIsLoadingData(false);
+        setIsFetchingAdData(false);
         return;
       }
 
@@ -1911,6 +2259,7 @@ const App = () => {
       setApiError(error instanceof Error ? error.message : '数据获取失败');
     } finally {
       setIsLoadingData(false);
+      setIsFetchingAdData(false);
     }
   };
 
@@ -2026,16 +2375,41 @@ const App = () => {
     setter(next);
   };
 
+  /** 当前 segment 模式下允许的平台列表 */
+  const allowedPlatformsForSegment = useMemo(() => {
+    return SEGMENT_ALLOWED_PLATFORMS[pivotSegmentMode] || DEFAULT_PIVOT_PLATFORM_SCOPES;
+  }, [pivotSegmentMode]);
+
   const togglePivotPlatformScope = (key: PivotPlatformScope) => {
+    if (!allowedPlatformsForSegment.includes(key)) return; // 不允许的平台不可切换
     setPivotPlatformScopes(prev => (
       prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
     ));
   };
 
   const togglePivotPlatformAll = () => {
-    setPivotPlatformScopes(prev => (
-      prev.length === DEFAULT_PIVOT_PLATFORM_SCOPES.length ? [] : [...DEFAULT_PIVOT_PLATFORM_SCOPES]
-    ));
+    setPivotPlatformScopes(prev => {
+      const allAllowed = allowedPlatformsForSegment;
+      const currentAllowed = prev.filter(k => allAllowed.includes(k));
+      return currentAllowed.length === allAllowed.length ? [] : [...allAllowed];
+    });
+  };
+
+  /** 切换 segment 模式时自动约束平台范围 */
+  const handleSegmentModeChange = (mode: PivotSegmentMode) => {
+    setPivotSegmentMode(mode);
+    const allowed = SEGMENT_ALLOWED_PLATFORMS[mode];
+    if (allowed) {
+      // 有限制：仅保留允许的平台，若交集为空则默认选中所有允许平台
+      setPivotPlatformScopes(prev => {
+        const filtered = prev.filter(k => allowed.includes(k));
+        return filtered.length > 0 ? filtered : [...allowed];
+      });
+    }
+    // 无限制（default / age / gender）：不修改已有平台选择，但如果当前为空则恢复全选
+    else {
+      setPivotPlatformScopes(prev => prev.length > 0 ? prev : [...DEFAULT_PIVOT_PLATFORM_SCOPES]);
+    }
   };
 
   const handleAddPivotFilter = (fieldKey: string) => {
@@ -2093,6 +2467,7 @@ const App = () => {
       values: [...pivotValues],
       display: { ...pivotDisplay },
       platformScopes: [...pivotPlatformScopes],
+      segmentMode: pivotSegmentMode,
     };
     setPivotPresets(prev => {
       const next = [...prev, preset];
@@ -2121,9 +2496,13 @@ const App = () => {
         dateRange: f.dateRange,
       }))
     );
+    const restoredSegment = preset.segmentMode || 'default';
+    setPivotSegmentMode(restoredSegment);
+    const allowedBySegment = SEGMENT_ALLOWED_PLATFORMS[restoredSegment] || DEFAULT_PIVOT_PLATFORM_SCOPES;
     const safePlatformScopes = (preset.platformScopes || DEFAULT_PIVOT_PLATFORM_SCOPES)
-      .filter(k => validPlatformScopes.has(k));
-    setPivotPlatformScopes(safePlatformScopes.length ? safePlatformScopes : DEFAULT_PIVOT_PLATFORM_SCOPES);
+      .filter(k => validPlatformScopes.has(k))
+      .filter(k => allowedBySegment.includes(k));
+    setPivotPlatformScopes(safePlatformScopes.length ? safePlatformScopes : [...allowedBySegment]);
     const filteredRows = preset.rows.filter(k => validDimKeys.has(k));
     const filteredCols = preset.columns.filter(k => validDimKeys.has(k));
     const filteredVals = preset.values.filter(k => validValueKeys.has(k));
@@ -2162,6 +2541,7 @@ const App = () => {
       values: [...pivotValues],
       display: { ...pivotDisplay },
       platformScopes: [...pivotPlatformScopes],
+      segmentMode: pivotSegmentMode,
     };
     setPivotPresets(prev => {
       const next = prev.map(p => (p.id === id ? updated : p));
@@ -2192,8 +2572,10 @@ const App = () => {
   };
 
   const handleRemoveDimension = (dim: string) => {
-    setAllDimensions(prev => prev.filter(d => d !== dim));
-    setDimConfigs(prev => prev.filter(c => c.label !== dim));
+    startTransition(() => {
+      setAllDimensions(prev => prev.filter(d => d !== dim));
+      setDimConfigs(prev => prev.filter(c => c.label !== dim));
+    });
   };
 
   const exportPivotData = (type: 'csv' | 'xlsx') => {
@@ -2334,8 +2716,8 @@ const App = () => {
     const cur = filteredData;
     const last = lastPeriodFilteredData;
     const baseKeys = [...BASE_METRICS, ...Object.keys(customMetricLabels)];
-    // 只汇总 segments=ad_date 的行，避免 age_date/gender_adset_date 等拆分行重复累加 cost
-    const baseRows = (data: typeof cur) => data.filter(r => (r.__segments || '').toLowerCase() === 'ad_date');
+    // 只汇总各平台默认 segment 行（Meta/Search/DG=ad_date, Pmax=asset_group_date），避免拆分行重复累加
+    const baseRows = (data: typeof cur) => data.filter(isDefaultSegmentRow);
     const sumContext = (data: typeof cur) => {
       const ctx: Record<string, number> = {};
       baseKeys.forEach(k => { ctx[k] = 0; });
@@ -2701,17 +3083,19 @@ const App = () => {
                     onClick={togglePivotPlatformAll}
                     className="text-[10px] font-black text-slate-400 hover:text-slate-200 transition"
                   >
-                    {pivotPlatformScopes.length === DEFAULT_PIVOT_PLATFORM_SCOPES.length ? '清空' : '全选'}
+                    {pivotPlatformScopes.filter(k => allowedPlatformsForSegment.includes(k)).length === allowedPlatformsForSegment.length ? '清空' : '全选'}
                   </button>
                 </div>
                 <div className="space-y-2">
                   {PIVOT_PLATFORM_OPTIONS.map(opt => {
                     const active = pivotPlatformScopes.includes(opt.key);
+                    const disabled = !allowedPlatformsForSegment.includes(opt.key);
                     return (
-                      <label key={opt.key} className="flex items-center gap-2 text-xs text-slate-200">
+                      <label key={opt.key} className={`flex items-center gap-2 text-xs ${disabled ? 'text-slate-600 cursor-not-allowed' : 'text-slate-200'}`}>
                         <input
                           type="checkbox"
                           checked={active}
+                          disabled={disabled}
                           onChange={() => togglePivotPlatformScope(opt.key)}
                         />
                         <span>{opt.label}</span>
@@ -2722,6 +3106,35 @@ const App = () => {
                 {pivotPlatformScopes.length === 0 && (
                   <div className="text-[10px] text-slate-500 mt-2">未选择平台将无数据展示</div>
                 )}
+              </div>
+
+              {/* Segment 数据层级 */}
+              <div>
+                <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">Segment 数据层级</div>
+                <div className="space-y-2">
+                  {PIVOT_SEGMENT_MODE_OPTIONS.map(opt => {
+                    const active = pivotSegmentMode === opt.key;
+                    return (
+                      <label key={opt.key} className="flex items-center gap-2 text-xs text-slate-200">
+                        <input
+                          type="radio"
+                          name="pivotSegmentMode"
+                          checked={active}
+                          onChange={() => handleSegmentModeChange(opt.key)}
+                        />
+                        <span>{opt.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-2">
+                  {pivotSegmentMode === 'default' && '各平台使用默认数据源（Meta=Ad Date, Pmax=Asset Group Date, 其他=Ad Date）'}
+                  {pivotSegmentMode === 'age' && '查看年龄维度拆分数据'}
+                  {pivotSegmentMode === 'gender' && '查看性别维度拆分数据'}
+                  {pivotSegmentMode === 'country' && '查看国家维度拆分数据（仅 Meta 有此层级，Google 回退默认）'}
+                  {pivotSegmentMode === 'keyword' && '查看关键词维度拆分数据（仅 Google Search 有此层级，其他回退默认）'}
+                  {pivotSegmentMode === 'search_term' && '查看搜索词维度拆分数据（仅 Google Search 有此层级，其他回退默认）'}
+                </div>
               </div>
 
               <div>
@@ -2970,6 +3383,27 @@ const App = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-indigo-500/30">
+
+      {/* 全屏加载页：仅点击「获取广告数据」时显示，选项目/拉配置不显示 */}
+      {isFetchingAdData && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/98 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="flex flex-col items-center justify-center gap-8 max-w-md mx-4">
+            <div className="w-24 h-24 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-2xl shadow-indigo-900/20 flex items-center justify-center relative overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-600/20 to-indigo-600/20" />
+              <RefreshCcw className="w-12 h-12 text-indigo-400 animate-spin relative z-10" />
+            </div>
+            <div className="text-center space-y-2">
+              <h2 className="text-xl font-black text-white">正在获取广告数据</h2>
+              <p className="text-slate-400 text-sm font-medium">同时拉取 Facebook 与 Google 平台数据，请稍候…</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+              <div className="w-2 h-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+              <div className="w-2 h-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* --- Top Navigation Bar --- */}
       <header className="sticky top-0 z-40 bg-slate-900/80 backdrop-blur-md border-b border-slate-800">
@@ -3242,6 +3676,15 @@ const App = () => {
                       {label}
                     </button>
                   ))}
+                  <div className="ml-auto">
+                    <button
+                      onClick={() => { setIsRawDataViewerOpen(true); setRawDataPage(0); setRawDataSearch(''); }}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition border border-slate-700"
+                    >
+                      <Database className="w-4 h-4" />
+                      源数据
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -3465,50 +3908,125 @@ const App = () => {
                           ))}
                         </div>
                       )}
-                      <div className="grid grid-cols-1 gap-4">
+
+                      {/* Segment 数据层级选择 */}
+                      <div className="flex items-center gap-3 bg-slate-800/60 rounded-2xl px-4 py-3 border border-slate-700/50">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest shrink-0">Segment</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {getSegmentOptions(activePlatformTab, activePlatformTab === 'google' ? activeGoogleType : undefined).map(opt => (
+                            <button
+                              key={opt.key}
+                              onClick={() => setActiveSegment(opt.key)}
+                              className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all ${activeSegment === opt.key ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-6">
                         {activeHeaders.length === 0 && (
                           <div className="px-4 py-3 rounded-2xl border border-dashed border-slate-700 text-[10px] font-black text-slate-500 uppercase tracking-widest">
                             请先获取广告数据
                           </div>
                         )}
-                        {Object.keys(activeMapping).map(key => {
-                          const val = (activeMapping as any)[key];
-                          if (val === undefined) return null;
+
+                        {/* 按分类分组展示指标字段 */}
+                        {getMetricCategories(activePlatformTab, activePlatformTab === 'google' ? activeGoogleType : undefined).map(cat => {
+                          const visibleKeys = cat.keys.filter(k => activeMapping.hasOwnProperty(k) && (activeMapping as any)[k] !== undefined);
+                          if (visibleKeys.length === 0) return null;
                           return (
-                            <div key={key} className="grid grid-cols-12 items-center gap-3 group">
-                              <div className="col-span-12 md:col-span-4 flex items-center justify-between">
-                                <label className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">{getLabelForKey(key)}</label>
-                                {key.startsWith('custom_') && (
-                                  <button onClick={() => handleRemoveMetric(key)} className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-red-500 transition-all p-1">
-                                    <Trash2 size={10} />
-                                  </button>
-                                )}
+                            <div key={cat.label} className="space-y-3">
+                              <div className="flex items-center gap-2 pb-1.5 border-b border-slate-800">
+                                <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">{cat.label}</span>
+                                <span className="text-[8px] text-slate-600 font-bold">{visibleKeys.length} 项</span>
                               </div>
-                              <div className="col-span-12 md:col-span-8 min-w-0">
-                                <select className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl px-4 py-3 text-[11px] font-black outline-none text-white" value={val || ''} onChange={e => {
-                                  const val = e.target.value;
-                                  if (activePlatformTab === 'facebook') {
-                                    setMappings(p => ({ ...p, facebook: { ...p.facebook, [key]: val } }));
-                                  } else {
-                                    setMappings(p => ({
-                                      ...p,
-                                      google: {
-                                        ...p.google,
-                                        [activeGoogleType]: { ...p.google[activeGoogleType], [key]: val }
-                                      }
-                                    }));
-                                  }
-                                }}>
-                                  <option value="">未选择 (Unmapped)</option>
-                                  {activeHeaders.map(h => <option key={h} value={h}>{h}</option>)}
-                                </select>
+                              <div className="grid grid-cols-1 gap-3">
+                                {visibleKeys.map(key => {
+                                  const val = (activeMapping as any)[key];
+                                  return (
+                                    <div key={key} className="grid grid-cols-12 items-center gap-3 group">
+                                      <div className="col-span-12 md:col-span-4">
+                                        <label className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">{getLabelForKey(key)}</label>
+                                      </div>
+                                      <div className="col-span-12 md:col-span-8 min-w-0">
+                                        <select className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl px-4 py-3 text-[11px] font-black outline-none text-white" value={val || ''} onChange={e => {
+                                          const v = e.target.value;
+                                          if (activePlatformTab === 'facebook') {
+                                            setMappings(p => ({ ...p, facebook: { ...p.facebook, [key]: v } }));
+                                          } else {
+                                            setMappings(p => ({
+                                              ...p,
+                                              google: {
+                                                ...p.google,
+                                                [activeGoogleType]: { ...p.google[activeGoogleType], [key]: v }
+                                              }
+                                            }));
+                                          }
+                                        }}>
+                                          <option value="">未选择 (Unmapped)</option>
+                                          {activeHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                                        </select>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </div>
                           );
                         })}
 
+                        {/* 自定义指标分组 */}
+                        {(() => {
+                          const customKeys = Object.keys(activeMapping).filter(k => k.startsWith('custom_') && (activeMapping as any)[k] !== undefined);
+                          if (customKeys.length === 0) return null;
+                          return (
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2 pb-1.5 border-b border-amber-900/50">
+                                <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest">自定义指标</span>
+                                <span className="text-[8px] text-slate-600 font-bold">{customKeys.length} 项</span>
+                              </div>
+                              <div className="grid grid-cols-1 gap-3">
+                                {customKeys.map(key => {
+                                  const val = (activeMapping as any)[key];
+                                  return (
+                                    <div key={key} className="grid grid-cols-12 items-center gap-3 group">
+                                      <div className="col-span-12 md:col-span-4 flex items-center justify-between">
+                                        <label className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">{getLabelForKey(key)}</label>
+                                        <button onClick={() => handleRemoveMetric(key)} className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-red-500 transition-all p-1">
+                                          <Trash2 size={10} />
+                                        </button>
+                                      </div>
+                                      <div className="col-span-12 md:col-span-8 min-w-0">
+                                        <select className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl px-4 py-3 text-[11px] font-black outline-none text-white" value={val || ''} onChange={e => {
+                                          const v = e.target.value;
+                                          if (activePlatformTab === 'facebook') {
+                                            setMappings(p => ({ ...p, facebook: { ...p.facebook, [key]: v } }));
+                                          } else {
+                                            setMappings(p => ({
+                                              ...p,
+                                              google: {
+                                                ...p.google,
+                                                [activeGoogleType]: { ...p.google[activeGoogleType], [key]: v }
+                                              }
+                                            }));
+                                          }
+                                        }}>
+                                          <option value="">未选择 (Unmapped)</option>
+                                          {activeHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                                        </select>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })()}
+
                         {/* Inline Add Metric Card */}
-                        <div className="space-y-2">
+                        <div className="space-y-2 pt-2">
                           <label className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">新增基础指标</label>
                           {isAddingMetric ? (
                             <div className="flex items-center gap-2">
@@ -3549,10 +4067,17 @@ const App = () => {
                         <button className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-[10px] font-black hover:bg-indigo-700 transition" onClick={() => openFormulaModal()}>+ 新增公式</button>
                       </div>
                       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 flex-1 content-start">
-                        {formulas.map(f => (
+                        {formulas.map(f => {
+                          const scope = inferFormulaPlatformScope(f.formula);
+                          return (
                           <div key={f.id} className="p-6 bg-slate-800 rounded-3xl border border-slate-700 flex items-center justify-between group">
                             <div>
-                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{f.name}</p>
+                              <div className="flex items-center gap-2 mb-1">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{f.name}</p>
+                                <span className={`text-[7px] px-1.5 py-0.5 rounded-full font-black ${scope === 'Meta' ? 'bg-blue-900/50 text-blue-300 border border-blue-800' : 'bg-emerald-900/50 text-emerald-300 border border-emerald-800'}`}>
+                                  {scope}
+                                </span>
+                              </div>
                               <p className="text-xs font-mono font-bold text-slate-200">{f.formula}</p>
                             </div>
                             <div className="flex items-center gap-3">
@@ -3560,7 +4085,8 @@ const App = () => {
                               {!f.isDefault && <button onClick={() => setFormulas(formulas.filter(x => x.id !== f.id))} className="p-2 bg-slate-900 rounded-lg shadow-sm text-slate-400 hover:text-red-500 transition"><Trash2 size={14} /></button>}
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                         {formulas.length === 0 && (
                           <div className="h-full flex flex-col items-center justify-center text-slate-500 opacity-50 space-y-2 py-12 border-2 border-dashed border-slate-800 rounded-3xl">
                             <Calculator size={32} />
@@ -3617,7 +4143,24 @@ const App = () => {
                           </div>
                         )}
 
+                        {/* Segment 数据层级选择 */}
+                        <div className="space-y-2">
+                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Segment 数据层级</p>
+                          <div className="flex flex-col gap-1.5">
+                            {getSegmentOptions(activePlatformTab, activePlatformTab === 'google' ? activeGoogleType : undefined).map(opt => (
+                              <button
+                                key={opt.key}
+                                onClick={() => setActiveSegment(opt.key)}
+                                className={`px-3 py-2 rounded-lg text-[9px] font-black transition-all text-left ${activeSegment === opt.key ? 'bg-purple-600 text-white shadow-md' : 'text-slate-400 bg-slate-900 hover:text-slate-200 hover:bg-slate-900/70'}`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
                         <div className="space-y-4">
+                          {/* 通用：Campaign Name / Ad Set Name / Ad Name（所有平台/类型） */}
                           <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
                             <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Campaign Name Sample</label>
                             <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.campaign}>{namingSamples.campaign || 'N/A'}</div>
@@ -3630,13 +4173,8 @@ const App = () => {
                             <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Ad Name Sample</label>
                             <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.ad}>{namingSamples.ad || 'N/A'}</div>
                           </div>
-                          {/* 按平台展示列维度样本：Meta=Country；Google Search=Search keyword/term；Demand Gen=Ad status 等 */}
-                          {activePlatformTab === 'facebook' && (
-                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Country (Meta)</label>
-                              <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={(namingSamples as Record<string, string>).country}>{(namingSamples as Record<string, string>).country || 'N/A'}</div>
-                            </div>
-                          )}
+
+                          {/* Google Search 专属：Search keyword / Search term */}
                           {activePlatformTab === 'google' && activeGoogleType === 'SEARCH' && (
                             <>
                               <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
@@ -3649,10 +4187,30 @@ const App = () => {
                               </div>
                             </>
                           )}
+
+                          {/* 通用：age / gender（所有平台/类型均展示） */}
+                          <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                            <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Age</label>
+                            <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.age}>{namingSamples.age || 'N/A'}</div>
+                          </div>
+                          <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                            <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Gender</label>
+                            <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.gender}>{namingSamples.gender || 'N/A'}</div>
+                          </div>
+
+                          {/* Facebook 专属：Country（所有 segment 下均显示） */}
+                          {activePlatformTab === 'facebook' && (
+                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Country</label>
+                              <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={(namingSamples as Record<string, string>).country}>{(namingSamples as Record<string, string>).country || 'N/A'}</div>
+                            </div>
+                          )}
+
+                          {/* Google Demand Gen 专属：全部列维度样本 */}
                           {activePlatformTab === 'google' && activeGoogleType === 'DEMAND_GEN' && (
-                            <div className="space-y-2 max-h-[240px] overflow-y-auto custom-scrollbar">
+                            <div className="space-y-2 max-h-[320px] overflow-y-auto custom-scrollbar">
                               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest sticky top-0 bg-slate-800 py-1">Demand Gen 列维度样本</p>
-                              {(['adStatus', 'adType', 'devicePreference', 'headline', 'description', 'businessName', 'squareImageId', 'portraitImageId', 'logoImageId', 'landscapeImageId', 'videoId', 'callToActionText', 'callToActionHeadline', 'appFinalUrl', 'displayUrl', 'trackingUrlTemplate', 'finalUrlSuffix', 'customerParam'] as const).map(src => (
+                              {(['adStatus', 'adType', 'devicePreference', 'headline', 'longHeadline', 'description', 'businessName', 'imageId', 'squareImageId', 'portraitImageId', 'logoImageId', 'landscapeLogoId', 'videoId', 'callToActionText', 'callToActionHeadline', 'finalUrl', 'appFinalUrl', 'displayUrl', 'trackingUrlTemplate', 'finalUrlSuffix', 'customerParam'] as const).map(src => (
                                 <div key={src} className="bg-slate-900/50 p-2 rounded-xl border border-slate-800">
                                   <label className="text-[8px] font-black text-slate-500 uppercase block mb-0.5">{getColumnNameForSource(src)}</label>
                                   <div className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap" title={(namingSamples as Record<string, string>)[src]}>{(namingSamples as Record<string, string>)[src] || 'N/A'}</div>
@@ -3680,8 +4238,13 @@ const App = () => {
                             <div key={dim} className="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-slate-800 rounded-2xl border border-slate-700 shadow-sm group hover:border-purple-700 transition-all relative">
                               <div className="md:w-36 flex items-center justify-between shrink-0">
                                 <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">{dim}</span>
-                                <button onClick={() => handleRemoveDimension(dim)} className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-red-500 transition-all p-1 mr-1">
-                                  <Trash2 size={10} />
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveDimension(dim)}
+                                  className="shrink-0 flex items-center justify-center w-9 h-9 rounded-xl border-2 border-red-500/40 bg-red-500/10 text-red-400 hover:bg-red-500/25 hover:border-red-500 hover:text-red-300 active:scale-95 transition-all"
+                                  title="删除该维度"
+                                >
+                                  <Trash2 size={16} />
                                 </button>
                               </div>
                               <div className="grid grid-cols-12 gap-2 flex-1 w-full min-w-0">
@@ -3696,7 +4259,7 @@ const App = () => {
                                   <option value="age">Age</option>
                                   <option value="gender">Gender</option>
                                   <option value="platform">Platform</option>
-                                  <optgroup label="Meta 列维度">
+                                  <optgroup label="Meta 层级 Segment">
                                     <option value="country">Country</option>
                                   </optgroup>
                                   <optgroup label="Google Search 列维度">
@@ -3708,15 +4271,18 @@ const App = () => {
                                     <option value="adType">Ad type</option>
                                     <option value="devicePreference">Device preference</option>
                                     <option value="headline">Headline</option>
+                                    <option value="longHeadline">Long headline</option>
                                     <option value="description">Description</option>
                                     <option value="businessName">Business name</option>
+                                    <option value="imageId">Image ID</option>
                                     <option value="squareImageId">Square image ID</option>
                                     <option value="portraitImageId">Portrait image ID</option>
                                     <option value="logoImageId">Logo ID</option>
-                                    <option value="landscapeImageId">Landscape image ID</option>
+                                    <option value="landscapeLogoId">Landscape logo ID</option>
                                     <option value="videoId">Video ID</option>
                                     <option value="callToActionText">Call to action text</option>
                                     <option value="callToActionHeadline">Call to action headline</option>
+                                    <option value="finalUrl">Final URL</option>
                                     <option value="appFinalUrl">Mobile final URL</option>
                                     <option value="displayUrl">Display URL</option>
                                     <option value="trackingUrlTemplate">Tracking template</option>
@@ -4017,11 +4583,18 @@ const App = () => {
               </div>
               <div className="md:col-span-7 space-y-3">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">基础指标 (Metrics)</p>
-                <div className="grid grid-cols-2 gap-2 h-40 overflow-y-auto custom-scrollbar pr-1">
-                  {BASE_METRICS.map(m => (
-                    <button key={m} onClick={() => appendToFormula(m)} className="p-2 bg-slate-800 hover:bg-indigo-900/20 text-slate-200 hover:text-indigo-400 border border-slate-700 rounded-xl text-[7.5px] font-black uppercase text-left leading-tight min-h-[38px] transition-all">
-                      {getLabelForKey(m)}
-                    </button>
+                <div className="h-48 overflow-y-auto custom-scrollbar pr-1 space-y-3">
+                  {FORMULA_METRIC_CATEGORIES.map(cat => (
+                    <div key={cat.label}>
+                      <p className="text-[7px] font-black text-indigo-400/70 uppercase tracking-widest mb-1.5">{cat.label}</p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {cat.keys.map(m => (
+                          <button key={m} onClick={() => appendToFormula(m)} className="p-2 bg-slate-800 hover:bg-indigo-900/20 text-slate-200 hover:text-indigo-400 border border-slate-700 rounded-xl text-[7.5px] font-black uppercase text-left leading-tight min-h-[34px] transition-all">
+                            {getLabelForKey(m)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -4295,6 +4868,188 @@ const App = () => {
           </div>
         </div>
       )}
+
+      {/* ── 源数据查看器 Modal ── */}
+      {isRawDataViewerOpen && (() => {
+        const EXCLUDED_KEYS = new Set(['_raw']);
+        const PAGE_SIZE = 100;
+
+        // 按平台过滤
+        const platformFiltered = rawDataPlatformFilter === 'all'
+          ? rawData
+          : rawData.filter((r: any) => {
+              const p = String(r.__platform || '').toLowerCase();
+              return rawDataPlatformFilter === 'google' ? p.includes('google') : (p.includes('facebook') || p.includes('meta'));
+            });
+
+        // 搜索过滤
+        const searchLower = rawDataSearch.toLowerCase();
+        const searched = searchLower
+          ? platformFiltered.filter((r: any) =>
+              Object.entries(r).some(([k, v]) => !EXCLUDED_KEYS.has(k) && String(v ?? '').toLowerCase().includes(searchLower))
+            )
+          : platformFiltered;
+
+        // 提取全部列名
+        const allCols: string[] = [];
+        const colSet = new Set<string>();
+        searched.forEach((r: any) => {
+          Object.keys(r).forEach(k => {
+            if (!EXCLUDED_KEYS.has(k) && !colSet.has(k)) { colSet.add(k); allCols.push(k); }
+          });
+        });
+
+        const totalRows = searched.length;
+        const totalPages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
+        const safePage = Math.min(rawDataPage, totalPages - 1);
+        const pageData = searched.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+
+        // 导出 Excel
+        const handleExportRawXlsx = () => {
+          const header = allCols;
+          const rows = searched.map((r: any) => allCols.map(c => r[c] ?? ''));
+          const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, 'RawData');
+          XLSX.writeFile(wb, `source_data_${new Date().toISOString().slice(0, 10)}.xlsx`);
+        };
+
+        return (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setIsRawDataViewerOpen(false)}>
+            <div className="bg-slate-950 rounded-[32px] w-[95vw] max-w-[1600px] h-[90vh] mx-4 shadow-2xl border border-slate-800 flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-2xl bg-indigo-600/20 flex items-center justify-center">
+                    <Database size={20} className="text-indigo-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-white">API 源数据查看器</h3>
+                    <p className="text-[11px] text-slate-400 font-bold">
+                      共 {totalRows.toLocaleString()} 行 · {allCols.length} 个字段
+                      {rawDataPlatformFilter !== 'all' && ` · ${rawDataPlatformFilter === 'google' ? 'Google' : 'Meta'}`}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  {/* 平台筛选 */}
+                  <div className="flex items-center bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+                    {(['all', 'facebook', 'google'] as const).map(pf => (
+                      <button
+                        key={pf}
+                        onClick={() => { setRawDataPlatformFilter(pf); setRawDataPage(0); }}
+                        className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition ${rawDataPlatformFilter === pf ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                      >
+                        {pf === 'all' ? '全部' : pf === 'facebook' ? 'Meta' : 'Google'}
+                      </button>
+                    ))}
+                  </div>
+                  {/* 搜索 */}
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="搜索字段值..."
+                      value={rawDataSearch}
+                      onChange={e => { setRawDataSearch(e.target.value); setRawDataPage(0); }}
+                      className="bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs font-bold text-white outline-none focus:border-indigo-600 transition w-56"
+                    />
+                  </div>
+                  {/* 导出 */}
+                  <button
+                    onClick={handleExportRawXlsx}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-black hover:bg-emerald-500 transition"
+                  >
+                    <Download size={14} />
+                    导出 Excel
+                  </button>
+                  {/* 关闭 */}
+                  <button onClick={() => setIsRawDataViewerOpen(false)} className="w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center hover:bg-slate-700 transition text-slate-400">
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Table */}
+              <div className="flex-1 overflow-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="bg-slate-900">
+                      <th className="px-3 py-2.5 text-[9px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-800 sticky left-0 bg-slate-900 z-20 min-w-[50px]">#</th>
+                      {allCols.map(col => (
+                        <th key={col} className="px-3 py-2.5 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800 whitespace-nowrap min-w-[100px]">
+                          {col}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pageData.map((row: any, idx: number) => (
+                      <tr key={idx} className="border-b border-slate-800/50 hover:bg-slate-900/50 transition">
+                        <td className="px-3 py-2 text-[10px] font-bold text-slate-500 sticky left-0 bg-slate-950 z-10">{safePage * PAGE_SIZE + idx + 1}</td>
+                        {allCols.map(col => {
+                          const val = row[col];
+                          const display = val === null || val === undefined || val === '' ? '-' : String(val);
+                          const isNum = typeof val === 'number';
+                          return (
+                            <td key={col} className={`px-3 py-2 text-[11px] font-medium whitespace-nowrap max-w-[240px] truncate ${isNum ? 'text-emerald-300 tabular-nums' : 'text-slate-300'}`} title={display}>
+                              {display}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                    {pageData.length === 0 && (
+                      <tr>
+                        <td colSpan={allCols.length + 1} className="px-6 py-16 text-center text-slate-500 font-bold text-sm">
+                          {rawData.length === 0 ? '暂无数据，请先在数据源配置中拉取数据' : '无匹配结果'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="p-4 border-t border-slate-800 flex items-center justify-between shrink-0">
+                  <span className="text-[10px] font-bold text-slate-500">
+                    第 {safePage + 1} / {totalPages} 页 · 显示 {safePage * PAGE_SIZE + 1}-{Math.min((safePage + 1) * PAGE_SIZE, totalRows)} 行
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setRawDataPage(Math.max(0, safePage - 1))}
+                      disabled={safePage === 0}
+                      className="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-300 hover:bg-slate-700 transition disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      上一页
+                    </button>
+                    {/* 快速跳转 */}
+                    <input
+                      type="number"
+                      min={1}
+                      max={totalPages}
+                      value={safePage + 1}
+                      onChange={e => {
+                        const v = parseInt(e.target.value, 10);
+                        if (!isNaN(v) && v >= 1 && v <= totalPages) setRawDataPage(v - 1);
+                      }}
+                      className="w-16 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs font-bold text-white text-center outline-none focus:border-indigo-600"
+                    />
+                    <button
+                      onClick={() => setRawDataPage(Math.min(totalPages - 1, safePage + 1))}
+                      disabled={safePage >= totalPages - 1}
+                      className="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-300 hover:bg-slate-700 transition disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      下一页
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Project Selector Modal */}
       {isProjectModalOpen && (

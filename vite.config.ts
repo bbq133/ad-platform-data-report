@@ -19,6 +19,6 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(__dirname, '.'),
       }
     },
-    base: '/ad-platform-data-report/', // GitHub Pages base URL
+    base: mode === 'development' ? '/' : '/ad-platform-data-report/', // 本地开发用 /，部署用 GitHub Pages 路径
   };
 });
