@@ -83,8 +83,8 @@ interface MappingConfig {
   [key: string]: string | undefined;
 }
 
-type GoogleType = 'SEARCH' | 'DEMAND_GEN' | 'PERFORMANCE_MAX';
-type PivotPlatformScope = 'meta' | 'google_search' | 'google_demand_gen' | 'google_performance_max';
+type GoogleType = 'SEARCH' | 'DEMAND_GEN' | 'PERFORMANCE_MAX' | 'VIDEO' | 'SHOPPING';
+type PivotPlatformScope = 'meta' | 'google_search' | 'google_demand_gen' | 'google_performance_max' | 'google_video' | 'google_shopping';
 
 interface FormulaField {
   id: string;
@@ -233,7 +233,7 @@ const BUILTIN_BI_CARD_OPTIONS = [
 type BiCardKey = string;
 const DEFAULT_BI_CARD_ORDER: BiCardKey[] = BUILTIN_BI_CARD_OPTIONS.map(o => o.id);
 
-const GOOGLE_TYPES: GoogleType[] = ['SEARCH', 'DEMAND_GEN', 'PERFORMANCE_MAX'];
+const GOOGLE_TYPES: GoogleType[] = ['SEARCH', 'DEMAND_GEN', 'PERFORMANCE_MAX', 'VIDEO', 'SHOPPING'];
 
 /** Segment 类型：API 返回的数据层级 */
 type SegmentType = 'ad_date' | 'age_date' | 'gender_adset_date' | 'country_campaign_date' | 'asset_group_date' | 'keyword_date' | 'search_term_date';
@@ -271,6 +271,20 @@ const getSegmentOptions = (platform: 'facebook' | 'google', googleType?: GoogleT
       { key: 'gender_adset_date', label: 'Gender（性别）' },
       { key: 'asset_group_date', label: 'Asset Group（资产组）' },
       { key: 'age_date', label: 'Age（年龄）' },
+    ];
+  }
+  if (googleType === 'VIDEO') {
+    return [
+      { key: 'ad_date', label: 'Ad Date（默认数据源）', isDefault: true },
+      { key: 'age_date', label: 'Age（年龄）' },
+      { key: 'gender_adset_date', label: 'Gender（性别）' },
+    ];
+  }
+  if (googleType === 'SHOPPING') {
+    return [
+      { key: 'ad_date', label: 'Ad Date（默认数据源）', isDefault: true },
+      { key: 'age_date', label: 'Age（年龄）' },
+      { key: 'gender_adset_date', label: 'Gender（性别）' },
     ];
   }
   // DEMAND_GEN
@@ -319,6 +333,8 @@ const PIVOT_PLATFORM_OPTIONS: Array<{ key: PivotPlatformScope; label: string }> 
   { key: 'google_search', label: 'Google Search' },
   { key: 'google_demand_gen', label: 'Google Demand Gen' },
   { key: 'google_performance_max', label: 'Google Performance Max' },
+  { key: 'google_video', label: 'Google Video' },
+  { key: 'google_shopping', label: 'Google Shopping' },
 ];
 
 /** Segment 模式对应允许的平台范围；未列出的 segment 表示所有平台均可选 */
@@ -382,6 +398,8 @@ const PLATFORM_SPECIFIC_CATEGORIES: Record<string, MetricCategoryDef[]> = {
     { label: 'DG CTA 与 URL', keys: ['callToActionText', 'callToActionHeadline', 'appFinalUrl', 'displayUrl', 'trackingUrlTemplate', 'finalUrlSuffix', 'customerParam'] },
   ],
   google_PERFORMANCE_MAX: [],
+  google_VIDEO: [],
+  google_SHOPPING: [],
 };
 
 /** 获取当前平台/类型的全部指标分类（共有 + 平台特有） */
@@ -435,6 +453,16 @@ const MAPPING_TEMPLATE_DEMAND_GEN: MappingConfig = {
   callToActionText: '', callToActionHeadline: '', appFinalUrl: '', displayUrl: '', trackingUrlTemplate: '', finalUrlSuffix: '', customerParam: '',
 };
 const MAPPING_TEMPLATE_PMAX: MappingConfig = {
+  campaign: '', adSet: '', ad: '', date: '',
+  cost: '', impressions: '', reach: '', clicks: '', linkClicks: '',
+  conversionValue: '', conversion: '', addToCart: '', landingPageViews: '',
+};
+const MAPPING_TEMPLATE_VIDEO: MappingConfig = {
+  campaign: '', adSet: '', ad: '', date: '',
+  cost: '', impressions: '', reach: '', clicks: '', linkClicks: '',
+  conversionValue: '', conversion: '', addToCart: '', landingPageViews: '',
+};
+const MAPPING_TEMPLATE_SHOPPING: MappingConfig = {
   campaign: '', adSet: '', ad: '', date: '',
   cost: '', impressions: '', reach: '', clicks: '', linkClicks: '',
   conversionValue: '', conversion: '', addToCart: '', landingPageViews: '',
@@ -587,7 +615,7 @@ const App = () => {
     setProjectList([]);
     setSelectedProject(null);
     setRawData([]);
-    setHeadersBySource({ facebook: [], google: { SEARCH: [], DEMAND_GEN: [], PERFORMANCE_MAX: [] } });
+    setHeadersBySource({ facebook: [], google: { SEARCH: [], DEMAND_GEN: [], PERFORMANCE_MAX: [], VIDEO: [], SHOPPING: [] } });
     setDimConfigs([]);
     setActiveDashboardDim('');
     setAvailableDates([]);
@@ -607,6 +635,8 @@ const App = () => {
         SEARCH: { ...MAPPING_TEMPLATE_SEARCH },
         DEMAND_GEN: { ...MAPPING_TEMPLATE_DEMAND_GEN },
         PERFORMANCE_MAX: { ...MAPPING_TEMPLATE_PMAX },
+        VIDEO: { ...MAPPING_TEMPLATE_VIDEO },
+        SHOPPING: { ...MAPPING_TEMPLATE_SHOPPING },
       }
     });
   };
@@ -620,7 +650,7 @@ const App = () => {
     google: Record<GoogleType, string[]>;
   }>({
     facebook: [],
-    google: { SEARCH: [], DEMAND_GEN: [], PERFORMANCE_MAX: [] }
+    google: { SEARCH: [], DEMAND_GEN: [], PERFORMANCE_MAX: [], VIDEO: [], SHOPPING: [] }
   });
 
   // States
@@ -662,6 +692,11 @@ const App = () => {
   const [formulaInputUnit, setFormulaInputUnit] = useState<'' | '$' | '%'>('');
 
   const [dashboardPlatformFilter, setDashboardPlatformFilter] = useState<'all' | 'facebook' | 'google'>('all');
+  // BI 看板专属切片器（仅影响 BI 指标卡 + 趋势图，不影响数据透视 / 洞察报告）
+  const [biPlatformFilter, setBiPlatformFilter] = useState<'all' | 'meta' | 'google'>('all');
+  const [biGoogleTypeFilter, setBiGoogleTypeFilter] = useState<'all' | GoogleType>('all');
+  const [isBiSlicerOpen, setIsBiSlicerOpen] = useState(false);
+  const biSlicerRef = useRef<HTMLDivElement>(null);
   const [activePlatformTab, setActivePlatformTab] = useState<'facebook' | 'google'>('facebook');
   const [activeGoogleType, setActiveGoogleType] = useState<GoogleType>('SEARCH');
   /** 当前选中的 segment（指标对齐/维度配置页用） */
@@ -722,7 +757,7 @@ const App = () => {
 
   const normalizeGoogleType = (value: string): GoogleType => {
     const upper = value.toUpperCase();
-    if (upper === 'SEARCH' || upper === 'DEMAND_GEN' || upper === 'PERFORMANCE_MAX') {
+    if (upper === 'SEARCH' || upper === 'DEMAND_GEN' || upper === 'PERFORMANCE_MAX' || upper === 'VIDEO' || upper === 'SHOPPING') {
       return upper as GoogleType;
     }
     return 'PERFORMANCE_MAX';
@@ -765,7 +800,9 @@ const App = () => {
     const googleSets: Record<GoogleType, Set<string>> = {
       SEARCH: new Set(),
       DEMAND_GEN: new Set(),
-      PERFORMANCE_MAX: new Set()
+      PERFORMANCE_MAX: new Set(),
+      VIDEO: new Set(),
+      SHOPPING: new Set(),
     };
 
     rows.forEach(row => {
@@ -785,7 +822,9 @@ const App = () => {
       google: {
         SEARCH: sortKeys(googleSets.SEARCH),
         DEMAND_GEN: sortKeys(googleSets.DEMAND_GEN),
-        PERFORMANCE_MAX: sortKeys(googleSets.PERFORMANCE_MAX)
+        PERFORMANCE_MAX: sortKeys(googleSets.PERFORMANCE_MAX),
+        VIDEO: sortKeys(googleSets.VIDEO),
+        SHOPPING: sortKeys(googleSets.SHOPPING),
       }
     };
   };
@@ -800,13 +839,15 @@ const App = () => {
     // 合并模板默认值，确保新增字段在旧配置中也存在
     const facebook = { ...MAPPING_TEMPLATE_FACEBOOK, ...stripPlatformKey(data.facebook || {}) };
 
-    if (data.google && (data.google.SEARCH || data.google.DEMAND_GEN || data.google.PERFORMANCE_MAX)) {
+    if (data.google && (data.google.SEARCH || data.google.DEMAND_GEN || data.google.PERFORMANCE_MAX || data.google.VIDEO || data.google.SHOPPING)) {
       return {
         facebook,
         google: {
           SEARCH: { ...MAPPING_TEMPLATE_SEARCH, ...stripPlatformKey(data.google.SEARCH || {}) },
           DEMAND_GEN: { ...MAPPING_TEMPLATE_DEMAND_GEN, ...stripPlatformKey(data.google.DEMAND_GEN || {}) },
-          PERFORMANCE_MAX: { ...MAPPING_TEMPLATE_PMAX, ...stripPlatformKey(data.google.PERFORMANCE_MAX || {}) }
+          PERFORMANCE_MAX: { ...MAPPING_TEMPLATE_PMAX, ...stripPlatformKey(data.google.PERFORMANCE_MAX || {}) },
+          VIDEO: { ...MAPPING_TEMPLATE_VIDEO, ...stripPlatformKey(data.google.VIDEO || {}) },
+          SHOPPING: { ...MAPPING_TEMPLATE_SHOPPING, ...stripPlatformKey(data.google.SHOPPING || {}) },
         }
       };
     }
@@ -817,7 +858,9 @@ const App = () => {
       google: {
         SEARCH: { ...MAPPING_TEMPLATE_SEARCH, ...legacyGoogle },
         DEMAND_GEN: { ...MAPPING_TEMPLATE_DEMAND_GEN, ...legacyGoogle },
-        PERFORMANCE_MAX: { ...MAPPING_TEMPLATE_PMAX, ...legacyGoogle }
+        PERFORMANCE_MAX: { ...MAPPING_TEMPLATE_PMAX, ...legacyGoogle },
+        VIDEO: { ...MAPPING_TEMPLATE_VIDEO, ...legacyGoogle },
+        SHOPPING: { ...MAPPING_TEMPLATE_SHOPPING, ...legacyGoogle },
       }
     };
   };
@@ -831,6 +874,8 @@ const App = () => {
       SEARCH: { ...MAPPING_TEMPLATE_SEARCH },
       DEMAND_GEN: { ...MAPPING_TEMPLATE_DEMAND_GEN },
       PERFORMANCE_MAX: { ...MAPPING_TEMPLATE_PMAX },
+      VIDEO: { ...MAPPING_TEMPLATE_VIDEO },
+      SHOPPING: { ...MAPPING_TEMPLATE_SHOPPING },
     }
   });
 
@@ -844,7 +889,9 @@ const App = () => {
       google: {
         SEARCH: { ...prev.google.SEARCH, [key]: '' },
         DEMAND_GEN: { ...prev.google.DEMAND_GEN, [key]: '' },
-        PERFORMANCE_MAX: { ...prev.google.PERFORMANCE_MAX, [key]: '' }
+        PERFORMANCE_MAX: { ...prev.google.PERFORMANCE_MAX, [key]: '' },
+        VIDEO: { ...prev.google.VIDEO, [key]: '' },
+        SHOPPING: { ...prev.google.SHOPPING, [key]: '' },
       }
     }));
     setNewMetricName('');
@@ -862,7 +909,9 @@ const App = () => {
       google: {
         SEARCH: { ...prev.google.SEARCH, [key]: undefined },
         DEMAND_GEN: { ...prev.google.DEMAND_GEN, [key]: undefined },
-        PERFORMANCE_MAX: { ...prev.google.PERFORMANCE_MAX, [key]: undefined }
+        PERFORMANCE_MAX: { ...prev.google.PERFORMANCE_MAX, [key]: undefined },
+        VIDEO: { ...prev.google.VIDEO, [key]: undefined },
+        SHOPPING: { ...prev.google.SHOPPING, [key]: undefined },
       }
     }));
   };
@@ -881,7 +930,7 @@ const App = () => {
   // --- New Dashboard Features States ---
   const [newDimensionName, setNewDimensionName] = useState('');
   const [isAddingDimension, setIsAddingDimension] = useState(false);
-  
+
   // Data Quality Report States
   const [selectedQualityDimension, setSelectedQualityDimension] = useState<string>('');
   const [qualitySearchTerm, setQualitySearchTerm] = useState<string>('');
@@ -1021,6 +1070,9 @@ const App = () => {
       }
       if (pivotPresetDropdownRef.current && !pivotPresetDropdownRef.current.contains(event.target as Node)) {
         setIsPivotPresetDropdownOpen(false);
+      }
+      if (biSlicerRef.current && !biSlicerRef.current.contains(event.target as Node)) {
+        setIsBiSlicerOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -1421,6 +1473,20 @@ const App = () => {
     return data;
   }, [baseProcessedData, dateRange, dashboardPlatformFilter, dimFilters]);
 
+  // BI 看板专属：在全局 filteredData 基础上，再叠加 BI 切片器过滤
+  const biFilteredData = useMemo(() => {
+    let data = filteredData;
+    if (biPlatformFilter === 'meta') {
+      data = data.filter(row => row._platform === 'facebook');
+    } else if (biPlatformFilter === 'google') {
+      data = data.filter(row => row._platform === 'google');
+      if (biGoogleTypeFilter !== 'all') {
+        data = data.filter(row => row._googleType === biGoogleTypeFilter);
+      }
+    }
+    return data;
+  }, [filteredData, biPlatformFilter, biGoogleTypeFilter]);
+
   // --- Data Quality Report Logic ---
   const qualityDimensionLabels = useMemo(() =>
     dimConfigs.map(d => d.label),
@@ -1566,18 +1632,18 @@ const App = () => {
   // Filtered and sorted unmatched data
   const filteredQualityData = useMemo(() => {
     let list = qualityUnmatchedData;
-    
+
     // Platform filter
     if (qualityPlatformFilter !== 'all') {
       list = list.filter(item => item.row._platform === qualityPlatformFilter);
     }
-    
+
     // Search filter
     if (qualitySearchTerm.trim()) {
       const term = qualitySearchTerm.toLowerCase();
       list = list.filter(item => item.campaignName.toLowerCase().includes(term));
     }
-    
+
     // Sort
     const sorted = [...list].sort((a, b) => {
       if (qualitySort === 'date_desc') {
@@ -1585,7 +1651,7 @@ const App = () => {
       }
       return b.cost - a.cost; // cost_desc
     });
-    
+
     return sorted;
   }, [qualityUnmatchedData, qualityPlatformFilter, qualitySearchTerm, qualitySort]);
 
@@ -1612,15 +1678,25 @@ const App = () => {
         data = data.filter(row => activeValues.includes(row._dims[dimLabel] || 'Other'));
       }
     });
+    // BI 看板专属切片器（与 biFilteredData 保持一致）
+    if (biPlatformFilter === 'meta') {
+      data = data.filter(row => row._platform === 'facebook');
+    } else if (biPlatformFilter === 'google') {
+      data = data.filter(row => row._platform === 'google');
+      if (biGoogleTypeFilter !== 'all') {
+        data = data.filter(row => row._googleType === biGoogleTypeFilter);
+      }
+    }
     return data;
-  }, [baseProcessedData, dateRange.start, dateRange.end, dashboardPlatformFilter, dimFilters]);
+  }, [baseProcessedData, dateRange.start, dateRange.end, dashboardPlatformFilter, dimFilters, biPlatformFilter, biGoogleTypeFilter]);
 
   const aggregatedTrendData = useMemo(() => {
     const daily: Record<string, any> = {};
     const baseKeys = [...BASE_METRICS, ...Object.keys(customMetricLabels)];
 
     // 仅使用默认 segment 行，避免 age/gender/country 等拆分行导致重复累加
-    filteredData.filter(isDefaultSegmentRow).forEach(row => {
+    // 使用 biFilteredData（含 BI 切片器过滤），仅影响 BI 看板趋势图
+    biFilteredData.filter(isDefaultSegmentRow).forEach(row => {
       const d = row._date;
       if (!daily[d]) {
         daily[d] = { _date: d };
@@ -1640,7 +1716,7 @@ const App = () => {
     });
 
     return result.sort((a, b) => new Date(a._date).getTime() - new Date(b._date).getTime());
-  }, [filteredData, formulas, customMetricLabels]);
+  }, [biFilteredData, formulas, customMetricLabels]);
 
   const aggregateBy = (dimName: string) => {
     const groups: Record<string, any> = {};
@@ -1730,7 +1806,7 @@ const App = () => {
       }
       // Keyword / Search Term segment 仅 Google Search 有
       if ((pivotSegmentMode === 'keyword' || pivotSegmentMode === 'search_term') &&
-          !(row._platform === 'google' && row._googleType === 'SEARCH')) {
+        !(row._platform === 'google' && row._googleType === 'SEARCH')) {
         return isDefaultSegmentRow(row);
       }
       return seg === targetSeg;
@@ -1746,6 +1822,8 @@ const App = () => {
         if (gType === 'SEARCH' && !scopeSet.has('google_search')) return false;
         if (gType === 'DEMAND_GEN' && !scopeSet.has('google_demand_gen')) return false;
         if (gType === 'PERFORMANCE_MAX' && !scopeSet.has('google_performance_max')) return false;
+        if (gType === 'VIDEO' && !scopeSet.has('google_video')) return false;
+        if (gType === 'SHOPPING' && !scopeSet.has('google_shopping')) return false;
         return matchesSegment(row);
       }
       return pivotPlatformScopes.length === DEFAULT_PIVOT_PLATFORM_SCOPES.length;
@@ -2105,7 +2183,9 @@ const App = () => {
     const googleMappingByType: Record<GoogleType, MappingConfig> = {
       SEARCH: searchMapping,
       DEMAND_GEN: demandGenMapping,
-      PERFORMANCE_MAX: buildBaseMapping(hdrsBySource.google.PERFORMANCE_MAX, mappings.google.PERFORMANCE_MAX)
+      PERFORMANCE_MAX: buildBaseMapping(hdrsBySource.google.PERFORMANCE_MAX, mappings.google.PERFORMANCE_MAX),
+      VIDEO: buildBaseMapping(hdrsBySource.google.VIDEO, mappings.google.VIDEO),
+      SHOPPING: buildBaseMapping(hdrsBySource.google.SHOPPING, mappings.google.SHOPPING),
     };
 
     Object.keys(customMetricLabels).forEach(key => {
@@ -2175,7 +2255,7 @@ const App = () => {
         const quickStartDate = new Date(today);
         quickStartDate.setDate(quickStartDate.getDate() - 2); // 最近3天
         const quickStart = quickStartDate.toISOString().split('T')[0];
-        
+
         // Fetch accounts for the selected project using shortened date range
         const apiData = await fetchAllPlatformsData(
           project.projectId,
@@ -2712,8 +2792,9 @@ const App = () => {
   }, [dimFilters]);
 
   // BI 看板 KPI 卡片：本期 vs 上期真实环比（方案 A）
+  // 使用 biFilteredData（含 BI 切片器过滤），仅影响 BI 看板
   const biKpiCards = useMemo(() => {
-    const cur = filteredData;
+    const cur = biFilteredData;
     const last = lastPeriodFilteredData;
     const baseKeys = [...BASE_METRICS, ...Object.keys(customMetricLabels)];
     // 只汇总各平台默认 segment 行（Meta/Search/DG=ad_date, Pmax=asset_group_date），避免拆分行重复累加
@@ -2785,7 +2866,7 @@ const App = () => {
 
     const byId = new Map(cards.map(c => [c.id, c]));
     return biCardOrder.map(id => byId.get(id)).filter(Boolean) as typeof cards;
-  }, [filteredData, lastPeriodFilteredData, biCardOrder, allAvailableMetrics, formulaByName, customMetricLabels, biCardOptions]);
+  }, [biFilteredData, lastPeriodFilteredData, biCardOrder, allAvailableMetrics, formulaByName, customMetricLabels, biCardOptions]);
 
   // Conditional rendering for LoginPage
   if (!isLoggedIn) {
@@ -2796,587 +2877,671 @@ const App = () => {
   const renderDashboardContent = () => (
     <div ref={dashboardRef} className="pb-24 animate-in fade-in duration-1000">
       {activeReportTab === 'bi' && (
-      <section id="report-module-bi" className="scroll-mt-32">
-        <div className="space-y-12">
-      <div className="flex items-center justify-between">
-        <div className="text-[11px] font-black uppercase tracking-widest text-slate-400">BI 指标卡</div>
-        <button
-          onClick={() => { setBiCardDraft(biCardOrder); setIsBiConfigOpen(true); }}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-700 transition"
-        >
-          <Settings2 size={12} /> 指标设置
-        </button>
-      </div>
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-6">
-        {biKpiCards.map((k, idx) => (
-          <div key={idx} className="bg-slate-900/50 p-8 rounded-[40px] border border-slate-800 shadow-sm flex flex-col justify-between h-44 hover:shadow-xl transition-all group">
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{k.label}</span>
-            <div>
-              <span className="text-3xl font-black text-white tracking-tight">{k.value}</span>
-              <p className={`text-[10px] font-black mt-2 flex items-center gap-1 ${k.isImprovement ? 'text-emerald-500' : 'text-rose-500'}`}>
-                {k.trend === 'up' ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                {k.sub}
-              </p>
+        <section id="report-module-bi" className="scroll-mt-32">
+          <div className="space-y-12">
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] font-black uppercase tracking-widest text-slate-400">BI 指标卡</div>
+              <button
+                onClick={() => { setBiCardDraft(biCardOrder); setIsBiConfigOpen(true); }}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-700 transition"
+              >
+                <Settings2 size={12} /> 指标设置
+              </button>
+            </div>
+
+            {/* BI 看板专属切片器：平台 + Google 广告类型 */}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1.5 mr-1">
+                <Filter size={12} className="text-slate-500" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">切片器</span>
+              </div>
+              {/* 平台选择 */}
+              {(['all', 'meta', 'google'] as const).map(opt => {
+                const labels: Record<string, string> = { all: '全部平台', meta: 'Meta', google: 'Google' };
+                const isActive = biPlatformFilter === opt;
+                return (
+                  <button
+                    key={opt}
+                    onClick={() => { setBiPlatformFilter(opt); if (opt !== 'google') setBiGoogleTypeFilter('all'); }}
+                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                      isActive
+                        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30'
+                        : 'bg-slate-800/80 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+                    }`}
+                  >
+                    {labels[opt]}
+                  </button>
+                );
+              })}
+
+              {/* Google 广告类型下拉 — 仅在 Google 平台选中时展示 */}
+              {biPlatformFilter === 'google' && (
+                <div className="relative" ref={biSlicerRef}>
+                  <button
+                    onClick={() => setIsBiSlicerOpen(!isBiSlicerOpen)}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                      biGoogleTypeFilter !== 'all'
+                        ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/30'
+                        : 'bg-slate-800/80 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+                    }`}
+                  >
+                    <span>{biGoogleTypeFilter === 'all' ? '全部广告类型' : biGoogleTypeFilter.replace('_', ' ')}</span>
+                    <ChevronDown size={12} className={`transition-transform duration-200 ${isBiSlicerOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {isBiSlicerOpen && (
+                    <div className="absolute top-full left-0 mt-2 w-56 bg-slate-900 rounded-2xl shadow-2xl border border-slate-800 p-2 z-50 animate-in fade-in zoom-in-95 duration-150 origin-top-left">
+                      {(['all', 'SEARCH', 'DEMAND_GEN', 'PERFORMANCE_MAX', 'VIDEO', 'SHOPPING'] as const).map(gt => {
+                        const gtLabels: Record<string, string> = {
+                          all: '全部广告类型',
+                          SEARCH: 'Search',
+                          DEMAND_GEN: 'Demand Gen',
+                          PERFORMANCE_MAX: 'Performance Max',
+                          VIDEO: 'Video',
+                          SHOPPING: 'Shopping',
+                        };
+                        const isActive = biGoogleTypeFilter === gt;
+                        return (
+                          <button
+                            key={gt}
+                            onClick={() => { setBiGoogleTypeFilter(gt); setIsBiSlicerOpen(false); }}
+                            className={`w-full text-left px-4 py-2.5 rounded-xl text-[11px] font-bold transition-all ${
+                              isActive
+                                ? 'bg-emerald-600/20 text-emerald-400'
+                                : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span>{gtLabels[gt]}</span>
+                              {isActive && <Check size={12} className="text-emerald-400" />}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 当前筛选条件标签 */}
+              {(biPlatformFilter !== 'all') && (
+                <button
+                  onClick={() => { setBiPlatformFilter('all'); setBiGoogleTypeFilter('all'); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/60 text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition text-[10px] font-bold"
+                >
+                  <X size={10} /> 清除筛选
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-6">
+              {biKpiCards.map((k, idx) => (
+                <div key={idx} className="bg-slate-900/50 p-8 rounded-[40px] border border-slate-800 shadow-sm flex flex-col justify-between h-44 hover:shadow-xl transition-all group">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{k.label}</span>
+                  <div>
+                    <span className="text-3xl font-black text-white tracking-tight">{k.value}</span>
+                    <p className={`text-[10px] font-black mt-2 flex items-center gap-1 ${k.isImprovement ? 'text-emerald-500' : 'text-rose-500'}`}>
+                      {k.trend === 'up' ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                      {k.sub}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-slate-900/50 p-12 rounded-[56px] border border-slate-800 shadow-sm relative overflow-visible">
+              <div className="flex flex-col md:flex-row md:items-start justify-between mb-12 gap-8 border-b border-slate-800 pb-8 relative overflow-visible">
+                <div className="flex flex-col gap-1">
+                  <h3 className="text-3xl font-black text-white tracking-tight leading-tight">核心指标趋势洞察</h3>
+                  <p className="text-slate-400 text-[11px] font-black uppercase tracking-[0.2em]">Single-Metric Focus Trend</p>
+                </div>
+
+                {/* Multi-Select Metric Dropdown */}
+                <div className="relative z-[50]" ref={metricDropdownRef}>
+                  <button
+                    onClick={() => setIsMetricDropdownOpen(!isMetricDropdownOpen)}
+                    className="flex items-center gap-4 bg-slate-800 hover:bg-slate-700 transition-all px-6 py-3.5 rounded-[24px] shadow-sm border border-slate-700"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></div>
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-200">
+                        {activeTrendMetrics.length === 1 ? allAvailableMetrics.find(m => m.key === activeTrendMetrics[0])?.label : `${activeTrendMetrics.length} Metrics Selected`}
+                      </span>
+                    </div>
+                    <ChevronDown size={14} className={`text-slate-400 transition-transform duration-300 ${isMetricDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {isMetricDropdownOpen && (
+                    <div className="absolute top-full right-0 mt-3 w-72 bg-slate-900 rounded-[32px] shadow-2xl border border-slate-800 p-4 animate-in fade-in zoom-in duration-200 origin-top-right overflow-hidden flex flex-col">
+                      <div className="flex items-center justify-between mb-4 px-2">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Select Metrics</span>
+                        <button onClick={() => setActiveTrendMetrics(['cost'])} className="text-[8px] font-black uppercase tracking-widest text-indigo-400 hover:underline">Reset</button>
+                      </div>
+                      <div className="max-h-80 overflow-y-auto custom-scrollbar pr-1 space-y-1">
+                        {allAvailableMetrics.map((m, idx) => (
+                          <button key={m.key} onClick={() => toggleTrendMetric(m.key)} className={`w-full flex items-center gap-3 p-3 rounded-2xl transition-all ${activeTrendMetrics.includes(m.key) ? 'bg-slate-800' : 'hover:bg-slate-800'}`}>
+                            <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all ${activeTrendMetrics.includes(m.key) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-700'}`}>
+                              {activeTrendMetrics.includes(m.key) && <Check size={12} className="text-white" strokeWidth={4} />}
+                            </div>
+                            <div className="flex items-center gap-2 flex-1">
+                              <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: getMetricColor(m.key, allAvailableMetrics.findIndex(a => a.key === m.key)) }}></div>
+                              <span className={`text-[11px] font-bold text-left ${activeTrendMetrics.includes(m.key) ? 'text-white' : 'text-slate-400'}`}>{m.label}</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="h-[450px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={aggregatedTrendData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
+                    <XAxis dataKey="_date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 'bold', fill: '#94a3b8' }} dy={10} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 'bold', fill: '#64748b' }} />
+                    <RechartsTooltip contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 25px 50px rgba(0,0,0,0.1)', backgroundColor: '#1e293b', color: '#e2e8f0' }} />
+                    <Legend verticalAlign="top" align="left" height={36} iconType="circle" wrapperStyle={{ paddingBottom: '20px', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#e2e8f0' }} />
+                    {activeTrendMetrics.map((mKey, idx) => (
+                      <Area key={mKey} type="monotone" dataKey={mKey} name={allAvailableMetrics.find(m => m.key === mKey)?.label || mKey} stroke={getMetricColor(mKey, allAvailableMetrics.findIndex(a => a.key === mKey))} strokeWidth={activeTrendMetrics.length > 3 ? 2 : 4} fillOpacity={0.08} fill={getMetricColor(mKey, allAvailableMetrics.findIndex(a => a.key === mKey))} animationDuration={1000} />
+                    ))}
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           </div>
-        ))}
-      </div>
-
-      <div className="bg-slate-900/50 p-12 rounded-[56px] border border-slate-800 shadow-sm relative overflow-visible">
-        <div className="flex flex-col md:flex-row md:items-start justify-between mb-12 gap-8 border-b border-slate-800 pb-8 relative overflow-visible">
-          <div className="flex flex-col gap-1">
-            <h3 className="text-3xl font-black text-white tracking-tight leading-tight">核心指标趋势洞察</h3>
-            <p className="text-slate-400 text-[11px] font-black uppercase tracking-[0.2em]">Single-Metric Focus Trend</p>
-          </div>
-
-          {/* Multi-Select Metric Dropdown */}
-          <div className="relative z-[50]" ref={metricDropdownRef}>
-            <button
-              onClick={() => setIsMetricDropdownOpen(!isMetricDropdownOpen)}
-              className="flex items-center gap-4 bg-slate-800 hover:bg-slate-700 transition-all px-6 py-3.5 rounded-[24px] shadow-sm border border-slate-700"
-            >
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-200">
-                  {activeTrendMetrics.length === 1 ? allAvailableMetrics.find(m => m.key === activeTrendMetrics[0])?.label : `${activeTrendMetrics.length} Metrics Selected`}
-                </span>
-              </div>
-              <ChevronDown size={14} className={`text-slate-400 transition-transform duration-300 ${isMetricDropdownOpen ? 'rotate-180' : ''}`} />
-            </button>
-            {isMetricDropdownOpen && (
-              <div className="absolute top-full right-0 mt-3 w-72 bg-slate-900 rounded-[32px] shadow-2xl border border-slate-800 p-4 animate-in fade-in zoom-in duration-200 origin-top-right overflow-hidden flex flex-col">
-                <div className="flex items-center justify-between mb-4 px-2">
-                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Select Metrics</span>
-                  <button onClick={() => setActiveTrendMetrics(['cost'])} className="text-[8px] font-black uppercase tracking-widest text-indigo-400 hover:underline">Reset</button>
-                </div>
-                <div className="max-h-80 overflow-y-auto custom-scrollbar pr-1 space-y-1">
-                  {allAvailableMetrics.map((m, idx) => (
-                    <button key={m.key} onClick={() => toggleTrendMetric(m.key)} className={`w-full flex items-center gap-3 p-3 rounded-2xl transition-all ${activeTrendMetrics.includes(m.key) ? 'bg-slate-800' : 'hover:bg-slate-800'}`}>
-                      <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all ${activeTrendMetrics.includes(m.key) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-700'}`}>
-                        {activeTrendMetrics.includes(m.key) && <Check size={12} className="text-white" strokeWidth={4} />}
-                      </div>
-                      <div className="flex items-center gap-2 flex-1">
-                        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: getMetricColor(m.key, allAvailableMetrics.findIndex(a => a.key === m.key)) }}></div>
-                        <span className={`text-[11px] font-bold text-left ${activeTrendMetrics.includes(m.key) ? 'text-white' : 'text-slate-400'}`}>{m.label}</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="h-[450px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={aggregatedTrendData}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
-              <XAxis dataKey="_date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 'bold', fill: '#94a3b8' }} dy={10} />
-              <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 'bold', fill: '#64748b' }} />
-              <RechartsTooltip contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 25px 50px rgba(0,0,0,0.1)', backgroundColor: '#1e293b', color: '#e2e8f0' }} />
-              <Legend verticalAlign="top" align="left" height={36} iconType="circle" wrapperStyle={{ paddingBottom: '20px', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#e2e8f0' }} />
-              {activeTrendMetrics.map((mKey, idx) => (
-                <Area key={mKey} type="monotone" dataKey={mKey} name={allAvailableMetrics.find(m => m.key === mKey)?.label || mKey} stroke={getMetricColor(mKey, allAvailableMetrics.findIndex(a => a.key === mKey))} strokeWidth={activeTrendMetrics.length > 3 ? 2 : 4} fillOpacity={0.08} fill={getMetricColor(mKey, allAvailableMetrics.findIndex(a => a.key === mKey))} animationDuration={1000} />
-              ))}
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-        </div>
-      </section>
+        </section>
       )}
 
       {activeReportTab === 'pivot' && (
-      <section id="report-module-pivot" className="scroll-mt-32">
-      <div className="bg-slate-900/50 p-10 rounded-[48px] border border-slate-800 shadow-sm relative overflow-visible">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-8">
-          <div>
-            <h3 className="text-2xl font-black text-white tracking-tight">数据透视分析</h3>
-            <p className="text-slate-400 text-[11px] font-black uppercase tracking-[0.2em]">Pivot · Rows / Columns / Values / Filters</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button onClick={() => setIsSavePivotModalOpen(true)} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition">【保存为新的报告】</button>
-            <div className="relative" ref={pivotPresetDropdownRef}>
-              <button
-                type="button"
-                onClick={() => setIsPivotPresetDropdownOpen(v => !v)}
-                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition flex items-center gap-2"
-                aria-expanded={isPivotPresetDropdownOpen}
-                aria-haspopup="listbox"
-              >
-                已保存报告
-                {pivotPresets.length > 0 && <span className="bg-indigo-600 text-white text-[10px] px-1.5 py-0.5 rounded-full">{pivotPresets.length}</span>}
-                <ChevronDown size={12} className={`transition-transform ${isPivotPresetDropdownOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {isPivotPresetDropdownOpen && (
-                <div className="absolute right-0 top-full mt-2 w-56 bg-slate-900 border border-slate-800 rounded-xl shadow-xl p-2 z-[50] max-h-64 overflow-y-auto custom-scrollbar" role="listbox">
-                  {pivotPresets.length === 0 ? (
-                    <p className="px-3 py-4 text-xs text-slate-500 text-center">暂无已保存报告</p>
-                  ) : (
-                    pivotPresets.map(p => (
-                      <div
-                        key={p.id}
-                        className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800 transition group cursor-pointer"
-                        onClick={() => handleApplyPivotPreset(p)}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => { if (e.key === 'Enter') handleApplyPivotPreset(p); }}
-                      >
-                        <span className="flex-1 text-left text-xs font-bold text-slate-200 truncate min-w-0">
-                          {p.name}
-                        </span>
-                        <button onClick={(e) => handleUpdatePivotPreset(p.id, e)} className="p-1 text-slate-500 hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="用当前配置覆盖">
-                          <Edit3 size={12} />
-                        </button>
-                        <button onClick={(e) => handleRemovePivotPreset(p.id, e)} className="p-1 text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="删除">
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    ))
+        <section id="report-module-pivot" className="scroll-mt-32">
+          <div className="bg-slate-900/50 p-10 rounded-[48px] border border-slate-800 shadow-sm relative overflow-visible">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-8">
+              <div>
+                <h3 className="text-2xl font-black text-white tracking-tight">数据透视分析</h3>
+                <p className="text-slate-400 text-[11px] font-black uppercase tracking-[0.2em]">Pivot · Rows / Columns / Values / Filters</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button onClick={() => setIsSavePivotModalOpen(true)} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition">【保存为新的报告】</button>
+                <div className="relative" ref={pivotPresetDropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => setIsPivotPresetDropdownOpen(v => !v)}
+                    className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition flex items-center gap-2"
+                    aria-expanded={isPivotPresetDropdownOpen}
+                    aria-haspopup="listbox"
+                  >
+                    已保存报告
+                    {pivotPresets.length > 0 && <span className="bg-indigo-600 text-white text-[10px] px-1.5 py-0.5 rounded-full">{pivotPresets.length}</span>}
+                    <ChevronDown size={12} className={`transition-transform ${isPivotPresetDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {isPivotPresetDropdownOpen && (
+                    <div className="absolute right-0 top-full mt-2 w-56 bg-slate-900 border border-slate-800 rounded-xl shadow-xl p-2 z-[50] max-h-64 overflow-y-auto custom-scrollbar" role="listbox">
+                      {pivotPresets.length === 0 ? (
+                        <p className="px-3 py-4 text-xs text-slate-500 text-center">暂无已保存报告</p>
+                      ) : (
+                        pivotPresets.map(p => (
+                          <div
+                            key={p.id}
+                            className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800 transition group cursor-pointer"
+                            onClick={() => handleApplyPivotPreset(p)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleApplyPivotPreset(p); }}
+                          >
+                            <span className="flex-1 text-left text-xs font-bold text-slate-200 truncate min-w-0">
+                              {p.name}
+                            </span>
+                            <button onClick={(e) => handleUpdatePivotPreset(p.id, e)} className="p-1 text-slate-500 hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="用当前配置覆盖">
+                              <Edit3 size={12} />
+                            </button>
+                            <button onClick={(e) => handleRemovePivotPreset(p.id, e)} className="p-1 text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="删除">
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   )}
                 </div>
-              )}
-            </div>
-            {activePivotPresetId && (
-              <button
-                onClick={() => handleUpdatePivotPreset(activePivotPresetId)}
-                className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-500 transition flex items-center gap-2"
-                title="将当前字段配置保存到当前报告"
-              >
-                【更新当前报告设置】
-              </button>
-            )}
-            <button onClick={copyPivotToClipboard} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition">复制表格</button>
-            <div className="relative" ref={pivotExportRef}>
-              <button
-                onClick={() => setIsPivotExportOpen(v => !v)}
-                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition flex items-center gap-2"
-              >
-                导出
-                <ChevronDown size={12} className={`transition-transform ${isPivotExportOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {isPivotExportOpen && (
-                <div className="absolute right-0 mt-2 w-36 bg-slate-900 border border-slate-800 rounded-xl shadow-xl p-2 z-20">
-                  <button onClick={() => { exportPivotData('csv'); setIsPivotExportOpen(false); }} className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 rounded-lg">导出 CSV</button>
-                  <button onClick={() => { exportPivotData('xlsx'); setIsPivotExportOpen(false); }} className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 rounded-lg">导出 Excel</button>
+                {activePivotPresetId && (
+                  <button
+                    onClick={() => handleUpdatePivotPreset(activePivotPresetId)}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-500 transition flex items-center gap-2"
+                    title="将当前字段配置保存到当前报告"
+                  >
+                    【更新当前报告设置】
+                  </button>
+                )}
+                <button onClick={copyPivotToClipboard} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition">复制表格</button>
+                <div className="relative" ref={pivotExportRef}>
+                  <button
+                    onClick={() => setIsPivotExportOpen(v => !v)}
+                    className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition flex items-center gap-2"
+                  >
+                    导出
+                    <ChevronDown size={12} className={`transition-transform ${isPivotExportOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {isPivotExportOpen && (
+                    <div className="absolute right-0 mt-2 w-36 bg-slate-900 border border-slate-800 rounded-xl shadow-xl p-2 z-20">
+                      <button onClick={() => { exportPivotData('csv'); setIsPivotExportOpen(false); }} className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 rounded-lg">导出 CSV</button>
+                      <button onClick={() => { exportPivotData('xlsx'); setIsPivotExportOpen(false); }} className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 rounded-lg">导出 Excel</button>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            <button onClick={() => setIsPivotDrawerOpen(v => !v)} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-700 transition">
-              {isPivotDrawerOpen ? '收起字段配置' : '字段配置'}
-            </button>
-          </div>
-        </div>
-        {pivotUpdateHintVisible && (
-          <p className="text-[11px] text-emerald-400/90 mt-1 mb-2 animate-in fade-in duration-200" role="status">
-            已更新当前报告设置
-          </p>
-        )}
-
-        <div className={`grid gap-6 ${isPivotDrawerOpen ? 'lg:grid-cols-[1fr_360px]' : 'grid-cols-1'}`}>
-          <div className="min-w-0">
-            {pivotValues.length === 0 ? (
-              <div className="h-80 flex flex-col items-center justify-center border-2 border-dashed border-slate-800 rounded-[32px] bg-slate-800/30 text-center px-6">
-                <div className="w-14 h-14 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mb-4">
-                  <TableIcon size={24} className="text-indigo-400" />
-                </div>
-                <p className="text-slate-300 font-black text-sm mb-2">请先配置透视字段</p>
-                <p className="text-slate-500 text-xs">添加 行 / 列 / 值 字段后即可生成透视结果</p>
-                <button onClick={() => setIsPivotDrawerOpen(true)} className="mt-4 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-700 transition">打开字段配置</button>
+                <button onClick={() => setIsPivotDrawerOpen(v => !v)} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-700 transition">
+                  {isPivotDrawerOpen ? '收起字段配置' : '字段配置'}
+                </button>
               </div>
-            ) : (
-              <div className="overflow-x-auto custom-scrollbar no-scrollbar-at-small pb-4">
-                <table className="w-full text-left border-separate border-spacing-y-2 min-w-[900px]">
-                  <thead>
-                    <tr>
-                      {(pivotResult?.rowDims.length ? pivotResult.rowDims : ['维度']).map((h, idx) => (
-                        <th key={idx} rowSpan={pivotResult?.valueKeys.length && pivotResult.valueKeys.length > 1 ? 2 : 1} className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-900/50 sticky left-0 z-20 min-w-[140px]">
-                          {h}
-                        </th>
-                      ))}
-                      {pivotResult?.colKeys.map(colKey => (
-                        pivotResult.valueKeys.length === 1 ? (
-                          <th
-                            key={colKey}
-                            className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center cursor-pointer hover:bg-slate-700/50 select-none"
-                            onClick={() => {
-                              const vk = pivotResult.valueKeys[0];
-                              setPivotSort(prev => prev?.colKey === colKey && prev?.valueKey === vk && prev.dir === 'asc' ? { colKey, valueKey: vk, dir: 'desc' } : { colKey, valueKey: vk, dir: 'asc' });
-                            }}
-                          >
-                            <span className="inline-flex items-center gap-1">
-                              {pivotResult.colLabels[colKey]}
-                              {pivotSort?.colKey === colKey && pivotSort?.valueKey === pivotResult.valueKeys[0] && (pivotSort.dir === 'asc' ? <ChevronUp size={12} className="opacity-80" /> : <ChevronDown size={12} className="opacity-80" />)}
-                            </span>
-                          </th>
-                        ) : (
-                          <th key={colKey} colSpan={pivotResult.valueKeys.length} className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
-                            {pivotResult.colLabels[colKey]}
-                          </th>
-                        )
-                      ))}
-                    </tr>
-                    {pivotResult?.valueKeys.length && pivotResult.valueKeys.length > 1 && (
-                      <tr>
-                        {pivotResult.colKeys.map(colKey => (
-                          pivotResult.valueKeys.map(vk => (
-                            <th
-                              key={`${colKey}-${vk}`}
-                              className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right whitespace-nowrap cursor-pointer hover:bg-slate-700/50 select-none"
-                              onClick={() => setPivotSort(prev => prev?.colKey === colKey && prev?.valueKey === vk && prev.dir === 'asc' ? { colKey, valueKey: vk, dir: 'desc' } : { colKey, valueKey: vk, dir: 'asc' })}
-                            >
-                              <span className="inline-flex items-center gap-1 justify-end w-full">
-                                {pivotValueMeta.get(vk)?.label || vk}
-                                {pivotSort?.colKey === colKey && pivotSort?.valueKey === vk && (pivotSort.dir === 'asc' ? <ChevronUp size={12} className="opacity-80" /> : <ChevronDown size={12} className="opacity-80" />)}
-                              </span>
+            </div>
+            {pivotUpdateHintVisible && (
+              <p className="text-[11px] text-emerald-400/90 mt-1 mb-2 animate-in fade-in duration-200" role="status">
+                已更新当前报告设置
+              </p>
+            )}
+
+            <div className={`grid gap-6 ${isPivotDrawerOpen ? 'lg:grid-cols-[1fr_360px]' : 'grid-cols-1'}`}>
+              <div className="min-w-0">
+                {pivotValues.length === 0 ? (
+                  <div className="h-80 flex flex-col items-center justify-center border-2 border-dashed border-slate-800 rounded-[32px] bg-slate-800/30 text-center px-6">
+                    <div className="w-14 h-14 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mb-4">
+                      <TableIcon size={24} className="text-indigo-400" />
+                    </div>
+                    <p className="text-slate-300 font-black text-sm mb-2">请先配置透视字段</p>
+                    <p className="text-slate-500 text-xs">添加 行 / 列 / 值 字段后即可生成透视结果</p>
+                    <button onClick={() => setIsPivotDrawerOpen(true)} className="mt-4 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-700 transition">打开字段配置</button>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto custom-scrollbar no-scrollbar-at-small pb-4">
+                    <table className="w-full text-left border-separate border-spacing-y-2 min-w-[900px]">
+                      <thead>
+                        <tr>
+                          {(pivotResult?.rowDims.length ? pivotResult.rowDims : ['维度']).map((h, idx) => (
+                            <th key={idx} rowSpan={pivotResult?.valueKeys.length && pivotResult.valueKeys.length > 1 ? 2 : 1} className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-900/50 sticky left-0 z-20 min-w-[140px]">
+                              {h}
                             </th>
-                          ))
-                        ))}
-                      </tr>
-                    )}
-                  </thead>
-                  <tbody>
-                    {(() => {
-                      let lastRowLabels: string[] = [];
-                      return pivotDisplayRows.map((row, idx) => {
-                        const isSubtotal = row.type === 'subtotal';
-                        const isGrand = row.type === 'grand_total';
-                        let displayCells = row.displayCells;
-                        if (row.type === 'data' && (pivotResult.rowDims.length || 0) > 1) {
-                          displayCells = row.displayCells.map((val, i) => {
-                            const samePrefix = row.displayCells.slice(0, i + 1).every((v, idx2) => v === lastRowLabels[idx2]);
-                            return samePrefix ? '' : val;
-                          });
-                          lastRowLabels = row.displayCells;
-                        } else if (row.type !== 'data') {
-                          lastRowLabels = [];
-                        }
-                        return (
-                          <tr key={row.key + idx} className={`border border-transparent ${isGrand ? 'bg-indigo-900/20' : isSubtotal ? 'bg-slate-800/60' : 'bg-slate-800/40'} rounded-3xl`}>
-                            {(pivotResult.rowDims.length ? pivotResult.rowDims : ['维度']).map((_, i) => (
-                              <td key={i} className={`px-4 py-3 text-xs font-black ${isGrand ? 'text-indigo-300' : isSubtotal ? 'text-slate-200' : 'text-white'} sticky left-0 bg-inherit z-10`}>
-                                {displayCells[i] || ''}
-                              </td>
-                            ))}
+                          ))}
+                          {pivotResult?.colKeys.map(colKey => (
+                            pivotResult.valueKeys.length === 1 ? (
+                              <th
+                                key={colKey}
+                                className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center cursor-pointer hover:bg-slate-700/50 select-none"
+                                onClick={() => {
+                                  const vk = pivotResult.valueKeys[0];
+                                  setPivotSort(prev => prev?.colKey === colKey && prev?.valueKey === vk && prev.dir === 'asc' ? { colKey, valueKey: vk, dir: 'desc' } : { colKey, valueKey: vk, dir: 'asc' });
+                                }}
+                              >
+                                <span className="inline-flex items-center gap-1">
+                                  {pivotResult.colLabels[colKey]}
+                                  {pivotSort?.colKey === colKey && pivotSort?.valueKey === pivotResult.valueKeys[0] && (pivotSort.dir === 'asc' ? <ChevronUp size={12} className="opacity-80" /> : <ChevronDown size={12} className="opacity-80" />)}
+                                </span>
+                              </th>
+                            ) : (
+                              <th key={colKey} colSpan={pivotResult.valueKeys.length} className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
+                                {pivotResult.colLabels[colKey]}
+                              </th>
+                            )
+                          ))}
+                        </tr>
+                        {pivotResult?.valueKeys.length && pivotResult.valueKeys.length > 1 && (
+                          <tr>
                             {pivotResult.colKeys.map(colKey => (
                               pivotResult.valueKeys.map(vk => (
-                                <td key={`${row.key}-${colKey}-${vk}`} className={`px-4 py-3 text-right text-xs ${isGrand ? 'text-indigo-200 font-black' : isSubtotal ? 'text-slate-200 font-black' : 'text-slate-300 font-bold'}`}>
-                                  {formatPivotValue(row.cells[colKey]?.[vk] ?? null, vk)}
-                                </td>
+                                <th
+                                  key={`${colKey}-${vk}`}
+                                  className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right whitespace-nowrap cursor-pointer hover:bg-slate-700/50 select-none"
+                                  onClick={() => setPivotSort(prev => prev?.colKey === colKey && prev?.valueKey === vk && prev.dir === 'asc' ? { colKey, valueKey: vk, dir: 'desc' } : { colKey, valueKey: vk, dir: 'asc' })}
+                                >
+                                  <span className="inline-flex items-center gap-1 justify-end w-full">
+                                    {pivotValueMeta.get(vk)?.label || vk}
+                                    {pivotSort?.colKey === colKey && pivotSort?.valueKey === vk && (pivotSort.dir === 'asc' ? <ChevronUp size={12} className="opacity-80" /> : <ChevronDown size={12} className="opacity-80" />)}
+                                  </span>
+                                </th>
                               ))
                             ))}
                           </tr>
-                        );
-                      });
-                    })()}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {isPivotDrawerOpen && (
-            <div className="bg-slate-900/70 border border-slate-800 rounded-[32px] p-4 space-y-6">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="text-[11px] font-black uppercase tracking-widest text-slate-400">平台范围</div>
-                  <button
-                    onClick={togglePivotPlatformAll}
-                    className="text-[10px] font-black text-slate-400 hover:text-slate-200 transition"
-                  >
-                    {pivotPlatformScopes.filter(k => allowedPlatformsForSegment.includes(k)).length === allowedPlatformsForSegment.length ? '清空' : '全选'}
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {PIVOT_PLATFORM_OPTIONS.map(opt => {
-                    const active = pivotPlatformScopes.includes(opt.key);
-                    const disabled = !allowedPlatformsForSegment.includes(opt.key);
-                    return (
-                      <label key={opt.key} className={`flex items-center gap-2 text-xs ${disabled ? 'text-slate-600 cursor-not-allowed' : 'text-slate-200'}`}>
-                        <input
-                          type="checkbox"
-                          checked={active}
-                          disabled={disabled}
-                          onChange={() => togglePivotPlatformScope(opt.key)}
-                        />
-                        <span>{opt.label}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-                {pivotPlatformScopes.length === 0 && (
-                  <div className="text-[10px] text-slate-500 mt-2">未选择平台将无数据展示</div>
+                        )}
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          let lastRowLabels: string[] = [];
+                          return pivotDisplayRows.map((row, idx) => {
+                            const isSubtotal = row.type === 'subtotal';
+                            const isGrand = row.type === 'grand_total';
+                            let displayCells = row.displayCells;
+                            if (row.type === 'data' && (pivotResult.rowDims.length || 0) > 1) {
+                              displayCells = row.displayCells.map((val, i) => {
+                                const samePrefix = row.displayCells.slice(0, i + 1).every((v, idx2) => v === lastRowLabels[idx2]);
+                                return samePrefix ? '' : val;
+                              });
+                              lastRowLabels = row.displayCells;
+                            } else if (row.type !== 'data') {
+                              lastRowLabels = [];
+                            }
+                            return (
+                              <tr key={row.key + idx} className={`border border-transparent ${isGrand ? 'bg-indigo-900/20' : isSubtotal ? 'bg-slate-800/60' : 'bg-slate-800/40'} rounded-3xl`}>
+                                {(pivotResult.rowDims.length ? pivotResult.rowDims : ['维度']).map((_, i) => (
+                                  <td key={i} className={`px-4 py-3 text-xs font-black ${isGrand ? 'text-indigo-300' : isSubtotal ? 'text-slate-200' : 'text-white'} sticky left-0 bg-inherit z-10`}>
+                                    {displayCells[i] || ''}
+                                  </td>
+                                ))}
+                                {pivotResult.colKeys.map(colKey => (
+                                  pivotResult.valueKeys.map(vk => (
+                                    <td key={`${row.key}-${colKey}-${vk}`} className={`px-4 py-3 text-right text-xs ${isGrand ? 'text-indigo-200 font-black' : isSubtotal ? 'text-slate-200 font-black' : 'text-slate-300 font-bold'}`}>
+                                      {formatPivotValue(row.cells[colKey]?.[vk] ?? null, vk)}
+                                    </td>
+                                  ))
+                                ))}
+                              </tr>
+                            );
+                          });
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
 
-              {/* Segment 数据层级 */}
-              <div>
-                <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">Segment 数据层级</div>
-                <div className="space-y-2">
-                  {PIVOT_SEGMENT_MODE_OPTIONS.map(opt => {
-                    const active = pivotSegmentMode === opt.key;
-                    return (
-                      <label key={opt.key} className="flex items-center gap-2 text-xs text-slate-200">
-                        <input
-                          type="radio"
-                          name="pivotSegmentMode"
-                          checked={active}
-                          onChange={() => handleSegmentModeChange(opt.key)}
-                        />
-                        <span>{opt.label}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-                <div className="text-[10px] text-slate-500 mt-2">
-                  {pivotSegmentMode === 'default' && '各平台使用默认数据源（Meta=Ad Date, Pmax=Asset Group Date, 其他=Ad Date）'}
-                  {pivotSegmentMode === 'age' && '查看年龄维度拆分数据'}
-                  {pivotSegmentMode === 'gender' && '查看性别维度拆分数据'}
-                  {pivotSegmentMode === 'country' && '查看国家维度拆分数据（仅 Meta 有此层级，Google 回退默认）'}
-                  {pivotSegmentMode === 'keyword' && '查看关键词维度拆分数据（仅 Google Search 有此层级，其他回退默认）'}
-                  {pivotSegmentMode === 'search_term' && '查看搜索词维度拆分数据（仅 Google Search 有此层级，其他回退默认）'}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">筛选器</div>
-                <select
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mb-3"
-                  onChange={e => {
-                    handleAddPivotFilter(e.target.value);
-                    e.currentTarget.value = '';
-                  }}
-                  defaultValue=""
-                >
-                  <option value="">添加筛选字段</option>
-                  {pivotDimensionFields
-                    .filter(f => !pivotFilters.some(p => p.fieldKey === f.key))
-                    .map(f => (
-                      <option key={f.key} value={f.key}>{f.label}</option>
-                    ))}
-                </select>
-                <div className="space-y-3">
-                  {pivotFilters.map(f => {
-                    const field = pivotDimensionFields.find(df => df.key === f.fieldKey);
-                    const isDate = field?.type === 'date';
-                    const options = pivotDimensionValueOptions[f.fieldKey] || [];
-                    const filteredOptions = options.filter(v => v.toLowerCase().includes((f.search || '').toLowerCase()));
-                    return (
-                      <div key={f.id} className="bg-slate-800/60 border border-slate-700 rounded-2xl p-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-black text-white">{f.label}</span>
-                          <button onClick={() => removePivotFilter(f.id)} className="text-slate-400 hover:text-red-400">
-                            <X size={14} />
-                          </button>
-                        </div>
-                        {!isDate && (
-                          <select
-                            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white mt-2"
-                            value={f.mode}
-                            onChange={e => updatePivotFilter(f.id, { mode: e.target.value as any, selectedValues: [] })}
-                          >
-                            <option value="multi">多选</option>
-                            <option value="contains">包含</option>
-                            <option value="not_contains">不包含</option>
-                          </select>
-                        )}
-                        {isDate ? (
-                          <div className="grid grid-cols-2 gap-2 mt-2">
-                            <input type="date" className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white" value={f.dateRange.start} onChange={e => updatePivotFilter(f.id, { dateRange: { ...f.dateRange, start: e.target.value } })} />
-                            <input type="date" className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white" value={f.dateRange.end} onChange={e => updatePivotFilter(f.id, { dateRange: { ...f.dateRange, end: e.target.value } })} />
-                          </div>
-                        ) : f.mode === 'multi' ? (
-                          <div className="mt-2">
+              {isPivotDrawerOpen && (
+                <div className="bg-slate-900/70 border border-slate-800 rounded-[32px] p-4 space-y-6">
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-[11px] font-black uppercase tracking-widest text-slate-400">平台范围</div>
+                      <button
+                        onClick={togglePivotPlatformAll}
+                        className="text-[10px] font-black text-slate-400 hover:text-slate-200 transition"
+                      >
+                        {pivotPlatformScopes.filter(k => allowedPlatformsForSegment.includes(k)).length === allowedPlatformsForSegment.length ? '清空' : '全选'}
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {PIVOT_PLATFORM_OPTIONS.map(opt => {
+                        const active = pivotPlatformScopes.includes(opt.key);
+                        const disabled = !allowedPlatformsForSegment.includes(opt.key);
+                        return (
+                          <label key={opt.key} className={`flex items-center gap-2 text-xs ${disabled ? 'text-slate-600 cursor-not-allowed' : 'text-slate-200'}`}>
                             <input
-                              type="text"
-                              placeholder="搜索..."
-                              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white mb-2"
-                              value={f.search}
-                              onChange={e => updatePivotFilter(f.id, { search: e.target.value })}
+                              type="checkbox"
+                              checked={active}
+                              disabled={disabled}
+                              onChange={() => togglePivotPlatformScope(opt.key)}
                             />
-                            <div className="max-h-40 overflow-y-auto custom-scrollbar pr-1 space-y-1">
-                              {filteredOptions.map(v => {
-                                const active = f.selectedValues.includes(v);
-                                return (
-                                  <button
-                                    key={v}
-                                    onClick={() => {
-                                      const next = active ? f.selectedValues.filter(x => x !== v) : [...f.selectedValues, v];
-                                      updatePivotFilter(f.id, { selectedValues: next });
-                                    }}
-                                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left ${active ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
-                                  >
-                                    <div className={`w-3 h-3 rounded border ${active ? 'bg-white border-white' : 'border-slate-500'}`} />
-                                    <span className="text-[11px] truncate">{v}</span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        ) : (
-                          <input
-                            type="text"
-                            placeholder={f.mode === 'contains' ? '包含关键词' : '不包含关键词'}
-                            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white mt-2"
-                            value={f.textValue}
-                            onChange={e => updatePivotFilter(f.id, { textValue: e.target.value })}
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">行</div>
-                <select
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mb-3"
-                  onChange={e => {
-                    addPivotListItem(pivotRows, setPivotRows, e.target.value);
-                    e.currentTarget.value = '';
-                  }}
-                  defaultValue=""
-                >
-                  <option value="">添加行维度</option>
-                  {pivotDimensionFields.filter(f => !pivotRows.includes(f.key)).map(f => (
-                    <option key={f.key} value={f.key}>{f.label}</option>
-                  ))}
-                </select>
-                <div className="space-y-2">
-                  {pivotRows.map(k => (
-                    <div key={k} className="flex items-center gap-2 bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2">
-                      <span className="text-xs font-bold text-white flex-1">{pivotDimensionFields.find(f => f.key === k)?.label || k}</span>
-                      <button onClick={() => movePivotListItem(pivotRows, setPivotRows, k, 'up')} className="text-slate-400 hover:text-white"><ChevronUp size={14} /></button>
-                      <button onClick={() => movePivotListItem(pivotRows, setPivotRows, k, 'down')} className="text-slate-400 hover:text-white"><ChevronDown size={14} /></button>
-                      <button onClick={() => removePivotListItem(pivotRows, setPivotRows, k)} className="text-slate-400 hover:text-red-400"><Trash2 size={14} /></button>
+                            <span>{opt.label}</span>
+                          </label>
+                        );
+                      })}
                     </div>
-                  ))}
-                </div>
-              </div>
+                    {pivotPlatformScopes.length === 0 && (
+                      <div className="text-[10px] text-slate-500 mt-2">未选择平台将无数据展示</div>
+                    )}
+                  </div>
 
-              <div>
-                <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">列</div>
-                <select
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mb-3"
-                  onChange={e => {
-                    addPivotListItem(pivotColumns, setPivotColumns, e.target.value);
-                    e.currentTarget.value = '';
-                  }}
-                  defaultValue=""
-                >
-                  <option value="">添加列维度</option>
-                  {pivotDimensionFields.filter(f => !pivotColumns.includes(f.key)).map(f => (
-                    <option key={f.key} value={f.key}>{f.label}</option>
-                  ))}
-                </select>
-                <div className="space-y-2">
-                  {pivotColumns.map(k => (
-                    <div key={k} className="flex items-center gap-2 bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2">
-                      <span className="text-xs font-bold text-white flex-1">{pivotDimensionFields.find(f => f.key === k)?.label || k}</span>
-                      <button onClick={() => movePivotListItem(pivotColumns, setPivotColumns, k, 'up')} className="text-slate-400 hover:text-white"><ChevronUp size={14} /></button>
-                      <button onClick={() => movePivotListItem(pivotColumns, setPivotColumns, k, 'down')} className="text-slate-400 hover:text-white"><ChevronDown size={14} /></button>
-                      <button onClick={() => removePivotListItem(pivotColumns, setPivotColumns, k)} className="text-slate-400 hover:text-red-400"><Trash2 size={14} /></button>
+                  {/* Segment 数据层级 */}
+                  <div>
+                    <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">Segment 数据层级</div>
+                    <div className="space-y-2">
+                      {PIVOT_SEGMENT_MODE_OPTIONS.map(opt => {
+                        const active = pivotSegmentMode === opt.key;
+                        return (
+                          <label key={opt.key} className="flex items-center gap-2 text-xs text-slate-200">
+                            <input
+                              type="radio"
+                              name="pivotSegmentMode"
+                              checked={active}
+                              onChange={() => handleSegmentModeChange(opt.key)}
+                            />
+                            <span>{opt.label}</span>
+                          </label>
+                        );
+                      })}
                     </div>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">值</div>
-                <select
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mb-3"
-                  onChange={e => {
-                    addPivotListItem(pivotValues, setPivotValues, e.target.value);
-                    e.currentTarget.value = '';
-                  }}
-                  defaultValue=""
-                >
-                  <option value="">添加指标或公式</option>
-                  {pivotValueOptions.filter(v => !pivotValues.includes(v.key)).map(v => (
-                    <option key={v.key} value={v.key}>{v.label}</option>
-                  ))}
-                </select>
-                <div className="space-y-2">
-                  {pivotValues.map(k => (
-                    <div key={k} className="flex items-center gap-2 bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2">
-                      <span className="text-xs font-bold text-white flex-1">{pivotValueMeta.get(k)?.label || k}</span>
-                      <button onClick={() => movePivotListItem(pivotValues, setPivotValues, k, 'up')} className="text-slate-400 hover:text-white"><ChevronUp size={14} /></button>
-                      <button onClick={() => movePivotListItem(pivotValues, setPivotValues, k, 'down')} className="text-slate-400 hover:text-white"><ChevronDown size={14} /></button>
-                      <button onClick={() => removePivotListItem(pivotValues, setPivotValues, k)} className="text-slate-400 hover:text-red-400"><Trash2 size={14} /></button>
+                    <div className="text-[10px] text-slate-500 mt-2">
+                      {pivotSegmentMode === 'default' && '各平台使用默认数据源（Meta=Ad Date, Pmax=Asset Group Date, 其他=Ad Date）'}
+                      {pivotSegmentMode === 'age' && '查看年龄维度拆分数据'}
+                      {pivotSegmentMode === 'gender' && '查看性别维度拆分数据'}
+                      {pivotSegmentMode === 'country' && '查看国家维度拆分数据（仅 Meta 有此层级，Google 回退默认）'}
+                      {pivotSegmentMode === 'keyword' && '查看关键词维度拆分数据（仅 Google Search 有此层级，其他回退默认）'}
+                      {pivotSegmentMode === 'search_term' && '查看搜索词维度拆分数据（仅 Google Search 有此层级，其他回退默认）'}
                     </div>
-                  ))}
-                </div>
-                <div className="mt-2 text-[10px] text-slate-500">汇总方式默认：求和；公式字段按因子汇总后再计算。</div>
-              </div>
+                  </div>
 
-              <div>
-                <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">展示配置</div>
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-xs text-slate-200">
-                    <input type="checkbox" checked={pivotDisplay.showSubtotal} onChange={e => setPivotDisplay(prev => ({ ...prev, showSubtotal: e.target.checked }))} />
-                    显示小计（按行维度层级）
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-slate-200">
-                    <input type="checkbox" checked={pivotDisplay.showGrandTotal} onChange={e => setPivotDisplay(prev => ({ ...prev, showGrandTotal: e.target.checked }))} />
-                    显示合计（行/列二选一）
-                  </label>
-                  {pivotDisplay.showGrandTotal && (
+                  <div>
+                    <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">筛选器</div>
                     <select
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
-                      value={pivotDisplay.totalAxis}
-                      onChange={e => setPivotDisplay(prev => ({ ...prev, totalAxis: e.target.value as 'row' | 'column' }))}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mb-3"
+                      onChange={e => {
+                        handleAddPivotFilter(e.target.value);
+                        e.currentTarget.value = '';
+                      }}
+                      defaultValue=""
                     >
-                      <option value="row">行合计</option>
-                      <option value="column">列合计</option>
+                      <option value="">添加筛选字段</option>
+                      {pivotDimensionFields
+                        .filter(f => !pivotFilters.some(p => p.fieldKey === f.key))
+                        .map(f => (
+                          <option key={f.key} value={f.key}>{f.label}</option>
+                        ))}
                     </select>
-                  )}
-                  <div className="text-[10px] text-slate-500">空单元格显示：空白</div>
-                  <div className="text-[10px] text-slate-500">金额：$ + 2 位小数；比例：% + 2 位小数</div>
+                    <div className="space-y-3">
+                      {pivotFilters.map(f => {
+                        const field = pivotDimensionFields.find(df => df.key === f.fieldKey);
+                        const isDate = field?.type === 'date';
+                        const options = pivotDimensionValueOptions[f.fieldKey] || [];
+                        const filteredOptions = options.filter(v => v.toLowerCase().includes((f.search || '').toLowerCase()));
+                        return (
+                          <div key={f.id} className="bg-slate-800/60 border border-slate-700 rounded-2xl p-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-black text-white">{f.label}</span>
+                              <button onClick={() => removePivotFilter(f.id)} className="text-slate-400 hover:text-red-400">
+                                <X size={14} />
+                              </button>
+                            </div>
+                            {!isDate && (
+                              <select
+                                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white mt-2"
+                                value={f.mode}
+                                onChange={e => updatePivotFilter(f.id, { mode: e.target.value as any, selectedValues: [] })}
+                              >
+                                <option value="multi">多选</option>
+                                <option value="contains">包含</option>
+                                <option value="not_contains">不包含</option>
+                              </select>
+                            )}
+                            {isDate ? (
+                              <div className="grid grid-cols-2 gap-2 mt-2">
+                                <input type="date" className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white" value={f.dateRange.start} onChange={e => updatePivotFilter(f.id, { dateRange: { ...f.dateRange, start: e.target.value } })} />
+                                <input type="date" className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white" value={f.dateRange.end} onChange={e => updatePivotFilter(f.id, { dateRange: { ...f.dateRange, end: e.target.value } })} />
+                              </div>
+                            ) : f.mode === 'multi' ? (
+                              <div className="mt-2">
+                                <input
+                                  type="text"
+                                  placeholder="搜索..."
+                                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white mb-2"
+                                  value={f.search}
+                                  onChange={e => updatePivotFilter(f.id, { search: e.target.value })}
+                                />
+                                <div className="max-h-40 overflow-y-auto custom-scrollbar pr-1 space-y-1">
+                                  {filteredOptions.map(v => {
+                                    const active = f.selectedValues.includes(v);
+                                    return (
+                                      <button
+                                        key={v}
+                                        onClick={() => {
+                                          const next = active ? f.selectedValues.filter(x => x !== v) : [...f.selectedValues, v];
+                                          updatePivotFilter(f.id, { selectedValues: next });
+                                        }}
+                                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left ${active ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+                                      >
+                                        <div className={`w-3 h-3 rounded border ${active ? 'bg-white border-white' : 'border-slate-500'}`} />
+                                        <span className="text-[11px] truncate">{v}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ) : (
+                              <input
+                                type="text"
+                                placeholder={f.mode === 'contains' ? '包含关键词' : '不包含关键词'}
+                                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white mt-2"
+                                value={f.textValue}
+                                onChange={e => updatePivotFilter(f.id, { textValue: e.target.value })}
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">行</div>
+                    <select
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mb-3"
+                      onChange={e => {
+                        addPivotListItem(pivotRows, setPivotRows, e.target.value);
+                        e.currentTarget.value = '';
+                      }}
+                      defaultValue=""
+                    >
+                      <option value="">添加行维度</option>
+                      {pivotDimensionFields.filter(f => !pivotRows.includes(f.key)).map(f => (
+                        <option key={f.key} value={f.key}>{f.label}</option>
+                      ))}
+                    </select>
+                    <div className="space-y-2">
+                      {pivotRows.map(k => (
+                        <div key={k} className="flex items-center gap-2 bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2">
+                          <span className="text-xs font-bold text-white flex-1">{pivotDimensionFields.find(f => f.key === k)?.label || k}</span>
+                          <button onClick={() => movePivotListItem(pivotRows, setPivotRows, k, 'up')} className="text-slate-400 hover:text-white"><ChevronUp size={14} /></button>
+                          <button onClick={() => movePivotListItem(pivotRows, setPivotRows, k, 'down')} className="text-slate-400 hover:text-white"><ChevronDown size={14} /></button>
+                          <button onClick={() => removePivotListItem(pivotRows, setPivotRows, k)} className="text-slate-400 hover:text-red-400"><Trash2 size={14} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">列</div>
+                    <select
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mb-3"
+                      onChange={e => {
+                        addPivotListItem(pivotColumns, setPivotColumns, e.target.value);
+                        e.currentTarget.value = '';
+                      }}
+                      defaultValue=""
+                    >
+                      <option value="">添加列维度</option>
+                      {pivotDimensionFields.filter(f => !pivotColumns.includes(f.key)).map(f => (
+                        <option key={f.key} value={f.key}>{f.label}</option>
+                      ))}
+                    </select>
+                    <div className="space-y-2">
+                      {pivotColumns.map(k => (
+                        <div key={k} className="flex items-center gap-2 bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2">
+                          <span className="text-xs font-bold text-white flex-1">{pivotDimensionFields.find(f => f.key === k)?.label || k}</span>
+                          <button onClick={() => movePivotListItem(pivotColumns, setPivotColumns, k, 'up')} className="text-slate-400 hover:text-white"><ChevronUp size={14} /></button>
+                          <button onClick={() => movePivotListItem(pivotColumns, setPivotColumns, k, 'down')} className="text-slate-400 hover:text-white"><ChevronDown size={14} /></button>
+                          <button onClick={() => removePivotListItem(pivotColumns, setPivotColumns, k)} className="text-slate-400 hover:text-red-400"><Trash2 size={14} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">值</div>
+                    <select
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mb-3"
+                      onChange={e => {
+                        addPivotListItem(pivotValues, setPivotValues, e.target.value);
+                        e.currentTarget.value = '';
+                      }}
+                      defaultValue=""
+                    >
+                      <option value="">添加指标或公式</option>
+                      {pivotValueOptions.filter(v => !pivotValues.includes(v.key)).map(v => (
+                        <option key={v.key} value={v.key}>{v.label}</option>
+                      ))}
+                    </select>
+                    <div className="space-y-2">
+                      {pivotValues.map(k => (
+                        <div key={k} className="flex items-center gap-2 bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2">
+                          <span className="text-xs font-bold text-white flex-1">{pivotValueMeta.get(k)?.label || k}</span>
+                          <button onClick={() => movePivotListItem(pivotValues, setPivotValues, k, 'up')} className="text-slate-400 hover:text-white"><ChevronUp size={14} /></button>
+                          <button onClick={() => movePivotListItem(pivotValues, setPivotValues, k, 'down')} className="text-slate-400 hover:text-white"><ChevronDown size={14} /></button>
+                          <button onClick={() => removePivotListItem(pivotValues, setPivotValues, k)} className="text-slate-400 hover:text-red-400"><Trash2 size={14} /></button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-2 text-[10px] text-slate-500">汇总方式默认：求和；公式字段按因子汇总后再计算。</div>
+                  </div>
+
+                  <div>
+                    <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">展示配置</div>
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 text-xs text-slate-200">
+                        <input type="checkbox" checked={pivotDisplay.showSubtotal} onChange={e => setPivotDisplay(prev => ({ ...prev, showSubtotal: e.target.checked }))} />
+                        显示小计（按行维度层级）
+                      </label>
+                      <label className="flex items-center gap-2 text-xs text-slate-200">
+                        <input type="checkbox" checked={pivotDisplay.showGrandTotal} onChange={e => setPivotDisplay(prev => ({ ...prev, showGrandTotal: e.target.checked }))} />
+                        显示合计（行/列二选一）
+                      </label>
+                      {pivotDisplay.showGrandTotal && (
+                        <select
+                          className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                          value={pivotDisplay.totalAxis}
+                          onChange={e => setPivotDisplay(prev => ({ ...prev, totalAxis: e.target.value as 'row' | 'column' }))}
+                        >
+                          <option value="row">行合计</option>
+                          <option value="column">列合计</option>
+                        </select>
+                      )}
+                      <div className="text-[10px] text-slate-500">空单元格显示：空白</div>
+                      <div className="text-[10px] text-slate-500">金额：$ + 2 位小数；比例：% + 2 位小数</div>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
-          )}
-        </div>
-      </div>
-      </section>
+          </div>
+        </section>
       )}
 
       {activeReportTab === 'ai' && (
-      <section id="report-module-ai" className="scroll-mt-32">
-      <div className="bg-slate-900/50 p-12 rounded-[56px] border border-slate-800 shadow-sm overflow-hidden relative">
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-4">
-            <div className="w-10 h-10 bg-indigo-900/50 text-indigo-400 rounded-2xl flex items-center justify-center"><Zap size={20} /></div>
-            <div>
-              <h3 className="text-xl font-black text-white tracking-tight">AI 智能全维度诊断报告</h3>
-              <p className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Aetherion Standard • Growth Scientist Insight</p>
+        <section id="report-module-ai" className="scroll-mt-32">
+          <div className="bg-slate-900/50 p-12 rounded-[56px] border border-slate-800 shadow-sm overflow-hidden relative">
+            <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 bg-indigo-900/50 text-indigo-400 rounded-2xl flex items-center justify-center"><Zap size={20} /></div>
+                <div>
+                  <h3 className="text-xl font-black text-white tracking-tight">AI 智能全维度诊断报告</h3>
+                  <p className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Aetherion Standard • Growth Scientist Insight</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                {activeFiltersCount > 0 && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-900/20 border border-amber-900/40 rounded-full">
+                    <Filter size={10} className="text-amber-400" />
+                    <span className="text-[10px] font-black text-amber-400 uppercase">已过滤 {activeFiltersCount} 个维度</span>
+                  </div>
+                )}
+                <button onClick={handleAiAnalysis} disabled={isAnalyzing} className="bg-indigo-600 text-white px-8 py-3.5 rounded-2xl flex items-center gap-2 hover:bg-indigo-700 transition font-black text-xs shadow-xl shadow-indigo-900/20 disabled:opacity-50 active:scale-95">
+                  {isAnalyzing ? <RefreshCcw className="animate-spin" size={16} /> : <Lightbulb size={16} />}
+                  {isAnalyzing ? '智核分析中...' : '基于当前筛选生成报告'}
+                </button>
+              </div>
             </div>
-          </div>
-          <div className="flex items-center gap-4">
-            {activeFiltersCount > 0 && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-900/20 border border-amber-900/40 rounded-full">
-                <Filter size={10} className="text-amber-400" />
-                <span className="text-[10px] font-black text-amber-400 uppercase">已过滤 {activeFiltersCount} 个维度</span>
+            {aiAnalysis ? (
+              <div className="prose prose-slate max-w-none animate-in fade-in slide-in-from-bottom-4 duration-1000">
+                <div className="bg-slate-800 rounded-[40px] p-10 border border-slate-700 text-slate-200 leading-relaxed font-medium" dangerouslySetInnerHTML={{ __html: formatReportHtml(aiAnalysis) }} />
+              </div>
+            ) : (
+              <div className="h-64 flex flex-col items-center justify-center border-2 border-dashed border-slate-700 rounded-[40px] bg-slate-800/30">
+                <div className="w-16 h-16 bg-slate-900 rounded-3xl shadow-sm flex items-center justify-center mb-6"><Activity size={32} className="text-indigo-400" /></div>
+                <p className="text-slate-500 font-black uppercase tracking-[0.3em] text-[10px]">点击上方按钮 开启 AI 深度归因与投放建议</p>
               </div>
             )}
-            <button onClick={handleAiAnalysis} disabled={isAnalyzing} className="bg-indigo-600 text-white px-8 py-3.5 rounded-2xl flex items-center gap-2 hover:bg-indigo-700 transition font-black text-xs shadow-xl shadow-indigo-900/20 disabled:opacity-50 active:scale-95">
-              {isAnalyzing ? <RefreshCcw className="animate-spin" size={16} /> : <Lightbulb size={16} />}
-              {isAnalyzing ? '智核分析中...' : '基于当前筛选生成报告'}
-            </button>
           </div>
-        </div>
-        {aiAnalysis ? (
-          <div className="prose prose-slate max-w-none animate-in fade-in slide-in-from-bottom-4 duration-1000">
-            <div className="bg-slate-800 rounded-[40px] p-10 border border-slate-700 text-slate-200 leading-relaxed font-medium" dangerouslySetInnerHTML={{ __html: formatReportHtml(aiAnalysis) }} />
-          </div>
-        ) : (
-          <div className="h-64 flex flex-col items-center justify-center border-2 border-dashed border-slate-700 rounded-[40px] bg-slate-800/30">
-            <div className="w-16 h-16 bg-slate-900 rounded-3xl shadow-sm flex items-center justify-center mb-6"><Activity size={32} className="text-indigo-400" /></div>
-            <p className="text-slate-500 font-black uppercase tracking-[0.3em] text-[10px]">点击上方按钮 开启 AI 深度归因与投放建议</p>
-          </div>
-        )}
-      </div>
-      </section>
+        </section>
       )}
     </div>
   );
@@ -3877,281 +4042,47 @@ const App = () => {
 
                   {/* Top Row: Metrics & Formulas */}
                   {mappingTab === 'metrics' && (
-                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
 
-                    {/* Left: Metric Mapping */}
-                    <div className="bg-slate-900/50 border border-slate-800 rounded-[40px] p-10 shadow-2xl space-y-10">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-2xl font-black flex items-center gap-4 text-white"><Layers className="text-blue-400" /> 指标字段对齐</h3>
-
-                        <div className="flex items-center gap-4">
-
-                          <div className="flex bg-slate-800 p-1 rounded-xl">
-                            {['facebook', 'google'].map(p => (
-                              <button key={p} onClick={() => setActivePlatformTab(p as any)} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activePlatformTab === p ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400'}`}>
-                                {p}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                      {activePlatformTab === 'google' && (
-                        <div className="flex items-center gap-2">
-                          {GOOGLE_TYPES.map(t => (
-                            <button
-                              key={t}
-                              onClick={() => setActiveGoogleType(t)}
-                              className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeGoogleType === t ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 bg-slate-800'}`}
-                            >
-                              {t}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Segment 数据层级选择 */}
-                      <div className="flex items-center gap-3 bg-slate-800/60 rounded-2xl px-4 py-3 border border-slate-700/50">
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest shrink-0">Segment</span>
-                        <div className="flex flex-wrap gap-1.5">
-                          {getSegmentOptions(activePlatformTab, activePlatformTab === 'google' ? activeGoogleType : undefined).map(opt => (
-                            <button
-                              key={opt.key}
-                              onClick={() => setActiveSegment(opt.key)}
-                              className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all ${activeSegment === opt.key ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}
-                            >
-                              {opt.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="space-y-6">
-                        {activeHeaders.length === 0 && (
-                          <div className="px-4 py-3 rounded-2xl border border-dashed border-slate-700 text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                            请先获取广告数据
-                          </div>
-                        )}
-
-                        {/* 按分类分组展示指标字段 */}
-                        {getMetricCategories(activePlatformTab, activePlatformTab === 'google' ? activeGoogleType : undefined).map(cat => {
-                          const visibleKeys = cat.keys.filter(k => activeMapping.hasOwnProperty(k) && (activeMapping as any)[k] !== undefined);
-                          if (visibleKeys.length === 0) return null;
-                          return (
-                            <div key={cat.label} className="space-y-3">
-                              <div className="flex items-center gap-2 pb-1.5 border-b border-slate-800">
-                                <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">{cat.label}</span>
-                                <span className="text-[8px] text-slate-600 font-bold">{visibleKeys.length} 项</span>
-                              </div>
-                              <div className="grid grid-cols-1 gap-3">
-                                {visibleKeys.map(key => {
-                                  const val = (activeMapping as any)[key];
-                                  return (
-                                    <div key={key} className="grid grid-cols-12 items-center gap-3 group">
-                                      <div className="col-span-12 md:col-span-4">
-                                        <label className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">{getLabelForKey(key)}</label>
-                                      </div>
-                                      <div className="col-span-12 md:col-span-8 min-w-0">
-                                        <select className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl px-4 py-3 text-[11px] font-black outline-none text-white" value={val || ''} onChange={e => {
-                                          const v = e.target.value;
-                                          if (activePlatformTab === 'facebook') {
-                                            setMappings(p => ({ ...p, facebook: { ...p.facebook, [key]: v } }));
-                                          } else {
-                                            setMappings(p => ({
-                                              ...p,
-                                              google: {
-                                                ...p.google,
-                                                [activeGoogleType]: { ...p.google[activeGoogleType], [key]: v }
-                                              }
-                                            }));
-                                          }
-                                        }}>
-                                          <option value="">未选择 (Unmapped)</option>
-                                          {activeHeaders.map(h => <option key={h} value={h}>{h}</option>)}
-                                        </select>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          );
-                        })}
-
-                        {/* 自定义指标分组 */}
-                        {(() => {
-                          const customKeys = Object.keys(activeMapping).filter(k => k.startsWith('custom_') && (activeMapping as any)[k] !== undefined);
-                          if (customKeys.length === 0) return null;
-                          return (
-                            <div className="space-y-3">
-                              <div className="flex items-center gap-2 pb-1.5 border-b border-amber-900/50">
-                                <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest">自定义指标</span>
-                                <span className="text-[8px] text-slate-600 font-bold">{customKeys.length} 项</span>
-                              </div>
-                              <div className="grid grid-cols-1 gap-3">
-                                {customKeys.map(key => {
-                                  const val = (activeMapping as any)[key];
-                                  return (
-                                    <div key={key} className="grid grid-cols-12 items-center gap-3 group">
-                                      <div className="col-span-12 md:col-span-4 flex items-center justify-between">
-                                        <label className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">{getLabelForKey(key)}</label>
-                                        <button onClick={() => handleRemoveMetric(key)} className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-red-500 transition-all p-1">
-                                          <Trash2 size={10} />
-                                        </button>
-                                      </div>
-                                      <div className="col-span-12 md:col-span-8 min-w-0">
-                                        <select className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl px-4 py-3 text-[11px] font-black outline-none text-white" value={val || ''} onChange={e => {
-                                          const v = e.target.value;
-                                          if (activePlatformTab === 'facebook') {
-                                            setMappings(p => ({ ...p, facebook: { ...p.facebook, [key]: v } }));
-                                          } else {
-                                            setMappings(p => ({
-                                              ...p,
-                                              google: {
-                                                ...p.google,
-                                                [activeGoogleType]: { ...p.google[activeGoogleType], [key]: v }
-                                              }
-                                            }));
-                                          }
-                                        }}>
-                                          <option value="">未选择 (Unmapped)</option>
-                                          {activeHeaders.map(h => <option key={h} value={h}>{h}</option>)}
-                                        </select>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          );
-                        })()}
-
-                        {/* Inline Add Metric Card */}
-                        <div className="space-y-2 pt-2">
-                          <label className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">新增基础指标</label>
-                          {isAddingMetric ? (
-                            <div className="flex items-center gap-2">
-                              <input
-                                autoFocus
-                                className="flex-1 min-w-0 bg-slate-900 border-2 border-indigo-400 rounded-2xl p-3 text-[11px] font-black outline-none shadow-lg text-white"
-                                placeholder="输入指标名称..."
-                                value={newMetricName}
-                                onChange={e => setNewMetricName(e.target.value)}
-                                onKeyDown={e => {
-                                  if (e.key === 'Enter') handleAddMetric();
-                                  if (e.key === 'Escape') setIsAddingMetric(false);
-                                }}
-                              />
-                              <button onClick={handleAddMetric} className="bg-indigo-600 text-white p-3 rounded-2xl hover:bg-indigo-700 shadow-md">
-                                <Check size={14} />
-                              </button>
-                              <button onClick={() => setIsAddingMetric(false)} className="bg-slate-800 text-slate-400 p-3 rounded-2xl hover:bg-slate-700">
-                                <X size={14} />
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => setIsAddingMetric(true)}
-                              className="w-full border-2 border-dashed border-slate-700 rounded-2xl p-4 flex items-center justify-center gap-2 text-slate-400 hover:border-indigo-400 hover:text-indigo-400 hover:bg-indigo-900/20 transition-all text-[11px] font-black"
-                            >
-                              <Plus size={14} /> 新增对齐指标
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Right: Formula Config */}
-                    <div className="bg-slate-900/50 border border-slate-800 rounded-[40px] p-10 shadow-2xl space-y-8 flex flex-col">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-xl font-black flex items-center gap-4 text-white"><Calculator className="text-indigo-400" /> 公式字段配置</h3>
-                        <button className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-[10px] font-black hover:bg-indigo-700 transition" onClick={() => openFormulaModal()}>+ 新增公式</button>
-                      </div>
-                      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 flex-1 content-start">
-                        {formulas.map(f => {
-                          const scope = inferFormulaPlatformScope(f.formula);
-                          return (
-                          <div key={f.id} className="p-6 bg-slate-800 rounded-3xl border border-slate-700 flex items-center justify-between group">
-                            <div>
-                              <div className="flex items-center gap-2 mb-1">
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{f.name}</p>
-                                <span className={`text-[7px] px-1.5 py-0.5 rounded-full font-black ${scope === 'Meta' ? 'bg-blue-900/50 text-blue-300 border border-blue-800' : 'bg-emerald-900/50 text-emerald-300 border border-emerald-800'}`}>
-                                  {scope}
-                                </span>
-                              </div>
-                              <p className="text-xs font-mono font-bold text-slate-200">{f.formula}</p>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <button onClick={() => openFormulaModal(f)} className="p-2 bg-slate-900 rounded-lg shadow-sm text-slate-400 hover:text-indigo-400 transition"><Edit3 size={14} /></button>
-                              {!f.isDefault && <button onClick={() => setFormulas(formulas.filter(x => x.id !== f.id))} className="p-2 bg-slate-900 rounded-lg shadow-sm text-slate-400 hover:text-red-500 transition"><Trash2 size={14} /></button>}
-                            </div>
-                          </div>
-                          );
-                        })}
-                        {formulas.length === 0 && (
-                          <div className="h-full flex flex-col items-center justify-center text-slate-500 opacity-50 space-y-2 py-12 border-2 border-dashed border-slate-800 rounded-3xl">
-                            <Calculator size={32} />
-                            <p className="text-xs font-bold">暂无公式，点击右上角添加</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  )}
-
-                  {/* Bottom Row: Dimensions */}
-                  {mappingTab === 'dimensions' && (
-                  <div className="bg-slate-900/50 border border-slate-800 rounded-[40px] p-10 shadow-2xl space-y-10">
-                    <div>
-                      <h3 className="text-2xl font-black flex items-center gap-4 text-white"><Split className="text-purple-400" /> 维度参数配置</h3>
-                    </div>
-
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                      {/* Left Side: Samples */}
-                      <div className="lg:col-span-1 bg-slate-800 rounded-3xl p-6 space-y-6 border border-slate-700 shadow-inner h-fit">
+                      {/* Left: Metric Mapping */}
+                      <div className="bg-slate-900/50 border border-slate-800 rounded-[40px] p-10 shadow-2xl space-y-10">
                         <div className="flex items-center justify-between">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2"><TableIcon size={12} /> NAMING CONVENTION SAMPLES</p>
-                        </div>
-                        
-                        {/* Platform Selector */}
-                        <div className="flex bg-slate-900 p-1 rounded-xl">
-                          {['facebook', 'google'].map(p => (
-                            <button 
-                              key={p} 
-                              onClick={() => setActivePlatformTab(p as any)} 
-                              className={`flex-1 px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${activePlatformTab === p ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
-                            >
-                              {p === 'facebook' ? 'Meta' : 'Google'}
-                            </button>
-                          ))}
-                        </div>
+                          <h3 className="text-2xl font-black flex items-center gap-4 text-white"><Layers className="text-blue-400" /> 指标字段对齐</h3>
 
-                        {/* Google Type Selector */}
-                        {activePlatformTab === 'google' && (
-                          <div className="space-y-2">
-                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Google Ad Type</p>
-                            <div className="flex flex-col gap-1.5">
-                              {GOOGLE_TYPES.map(t => (
-                                <button
-                                  key={t}
-                                  onClick={() => setActiveGoogleType(t)}
-                                  className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all text-left ${activeGoogleType === t ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 bg-slate-900 hover:text-slate-200 hover:bg-slate-900/70'}`}
-                                >
-                                  {t.replace('_', ' ')}
+                          <div className="flex items-center gap-4">
+
+                            <div className="flex bg-slate-800 p-1 rounded-xl">
+                              {['facebook', 'google'].map(p => (
+                                <button key={p} onClick={() => setActivePlatformTab(p as any)} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activePlatformTab === p ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400'}`}>
+                                  {p}
                                 </button>
                               ))}
                             </div>
                           </div>
+                        </div>
+                        {activePlatformTab === 'google' && (
+                          <div className="flex items-center gap-2">
+                            {GOOGLE_TYPES.map(t => (
+                              <button
+                                key={t}
+                                onClick={() => setActiveGoogleType(t)}
+                                className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeGoogleType === t ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 bg-slate-800'}`}
+                              >
+                                {t}
+                              </button>
+                            ))}
+                          </div>
                         )}
 
                         {/* Segment 数据层级选择 */}
-                        <div className="space-y-2">
-                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Segment 数据层级</p>
-                          <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center gap-3 bg-slate-800/60 rounded-2xl px-4 py-3 border border-slate-700/50">
+                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest shrink-0">Segment</span>
+                          <div className="flex flex-wrap gap-1.5">
                             {getSegmentOptions(activePlatformTab, activePlatformTab === 'google' ? activeGoogleType : undefined).map(opt => (
                               <button
                                 key={opt.key}
                                 onClick={() => setActiveSegment(opt.key)}
-                                className={`px-3 py-2 rounded-lg text-[9px] font-black transition-all text-left ${activeSegment === opt.key ? 'bg-purple-600 text-white shadow-md' : 'text-slate-400 bg-slate-900 hover:text-slate-200 hover:bg-slate-900/70'}`}
+                                className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all ${activeSegment === opt.key ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}
                               >
                                 {opt.label}
                               </button>
@@ -4159,385 +4090,618 @@ const App = () => {
                           </div>
                         </div>
 
-                        <div className="space-y-4">
-                          {/* 通用：Campaign Name / Ad Set Name / Ad Name（所有平台/类型） */}
-                          <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                            <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Campaign Name Sample</label>
-                            <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.campaign}>{namingSamples.campaign || 'N/A'}</div>
-                          </div>
-                          <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                            <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Ad Set Name Sample</label>
-                            <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.adSet}>{namingSamples.adSet || 'N/A'}</div>
-                          </div>
-                          <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                            <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Ad Name Sample</label>
-                            <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.ad}>{namingSamples.ad || 'N/A'}</div>
-                          </div>
-
-                          {/* Google Search 专属：Search keyword / Search term */}
-                          {activePlatformTab === 'google' && activeGoogleType === 'SEARCH' && (
-                            <>
-                              <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                                <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Search keyword</label>
-                                <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={(namingSamples as Record<string, string>).searchKeyword}>{(namingSamples as Record<string, string>).searchKeyword || 'N/A'}</div>
-                              </div>
-                              <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                                <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Search term</label>
-                                <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={(namingSamples as Record<string, string>).searchTerm}>{(namingSamples as Record<string, string>).searchTerm || 'N/A'}</div>
-                              </div>
-                            </>
-                          )}
-
-                          {/* 通用：age / gender（所有平台/类型均展示） */}
-                          <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                            <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Age</label>
-                            <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.age}>{namingSamples.age || 'N/A'}</div>
-                          </div>
-                          <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                            <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Gender</label>
-                            <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.gender}>{namingSamples.gender || 'N/A'}</div>
-                          </div>
-
-                          {/* Facebook 专属：Country（所有 segment 下均显示） */}
-                          {activePlatformTab === 'facebook' && (
-                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Country</label>
-                              <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={(namingSamples as Record<string, string>).country}>{(namingSamples as Record<string, string>).country || 'N/A'}</div>
+                        <div className="space-y-6">
+                          {activeHeaders.length === 0 && (
+                            <div className="px-4 py-3 rounded-2xl border border-dashed border-slate-700 text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                              请先获取广告数据
                             </div>
                           )}
 
-                          {/* Google Demand Gen 专属：全部列维度样本 */}
-                          {activePlatformTab === 'google' && activeGoogleType === 'DEMAND_GEN' && (
-                            <div className="space-y-2 max-h-[320px] overflow-y-auto custom-scrollbar">
-                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest sticky top-0 bg-slate-800 py-1">Demand Gen 列维度样本</p>
-                              {(['adStatus', 'adType', 'devicePreference', 'headline', 'longHeadline', 'description', 'businessName', 'imageId', 'squareImageId', 'portraitImageId', 'logoImageId', 'landscapeLogoId', 'videoId', 'callToActionText', 'callToActionHeadline', 'finalUrl', 'appFinalUrl', 'displayUrl', 'trackingUrlTemplate', 'finalUrlSuffix', 'customerParam'] as const).map(src => (
-                                <div key={src} className="bg-slate-900/50 p-2 rounded-xl border border-slate-800">
-                                  <label className="text-[8px] font-black text-slate-500 uppercase block mb-0.5">{getColumnNameForSource(src)}</label>
-                                  <div className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap" title={(namingSamples as Record<string, string>)[src]}>{(namingSamples as Record<string, string>)[src] || 'N/A'}</div>
+                          {/* 按分类分组展示指标字段 */}
+                          {getMetricCategories(activePlatformTab, activePlatformTab === 'google' ? activeGoogleType : undefined).map(cat => {
+                            const visibleKeys = cat.keys.filter(k => activeMapping.hasOwnProperty(k) && (activeMapping as any)[k] !== undefined);
+                            if (visibleKeys.length === 0) return null;
+                            return (
+                              <div key={cat.label} className="space-y-3">
+                                <div className="flex items-center gap-2 pb-1.5 border-b border-slate-800">
+                                  <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">{cat.label}</span>
+                                  <span className="text-[8px] text-slate-600 font-bold">{visibleKeys.length} 项</span>
                                 </div>
-                              ))}
-                            </div>
-                          )}
+                                <div className="grid grid-cols-1 gap-3">
+                                  {visibleKeys.map(key => {
+                                    const val = (activeMapping as any)[key];
+                                    return (
+                                      <div key={key} className="grid grid-cols-12 items-center gap-3 group">
+                                        <div className="col-span-12 md:col-span-4">
+                                          <label className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">{getLabelForKey(key)}</label>
+                                        </div>
+                                        <div className="col-span-12 md:col-span-8 min-w-0">
+                                          <select className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl px-4 py-3 text-[11px] font-black outline-none text-white" value={val || ''} onChange={e => {
+                                            const v = e.target.value;
+                                            if (activePlatformTab === 'facebook') {
+                                              setMappings(p => ({ ...p, facebook: { ...p.facebook, [key]: v } }));
+                                            } else {
+                                              setMappings(p => ({
+                                                ...p,
+                                                google: {
+                                                  ...p.google,
+                                                  [activeGoogleType]: { ...p.google[activeGoogleType], [key]: v }
+                                                }
+                                              }));
+                                            }
+                                          }}>
+                                            <option value="">未选择 (Unmapped)</option>
+                                            {activeHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                                          </select>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          {/* 自定义指标分组 */}
+                          {(() => {
+                            const customKeys = Object.keys(activeMapping).filter(k => k.startsWith('custom_') && (activeMapping as any)[k] !== undefined);
+                            if (customKeys.length === 0) return null;
+                            return (
+                              <div className="space-y-3">
+                                <div className="flex items-center gap-2 pb-1.5 border-b border-amber-900/50">
+                                  <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest">自定义指标</span>
+                                  <span className="text-[8px] text-slate-600 font-bold">{customKeys.length} 项</span>
+                                </div>
+                                <div className="grid grid-cols-1 gap-3">
+                                  {customKeys.map(key => {
+                                    const val = (activeMapping as any)[key];
+                                    return (
+                                      <div key={key} className="grid grid-cols-12 items-center gap-3 group">
+                                        <div className="col-span-12 md:col-span-4 flex items-center justify-between">
+                                          <label className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">{getLabelForKey(key)}</label>
+                                          <button onClick={() => handleRemoveMetric(key)} className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-red-500 transition-all p-1">
+                                            <Trash2 size={10} />
+                                          </button>
+                                        </div>
+                                        <div className="col-span-12 md:col-span-8 min-w-0">
+                                          <select className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl px-4 py-3 text-[11px] font-black outline-none text-white" value={val || ''} onChange={e => {
+                                            const v = e.target.value;
+                                            if (activePlatformTab === 'facebook') {
+                                              setMappings(p => ({ ...p, facebook: { ...p.facebook, [key]: v } }));
+                                            } else {
+                                              setMappings(p => ({
+                                                ...p,
+                                                google: {
+                                                  ...p.google,
+                                                  [activeGoogleType]: { ...p.google[activeGoogleType], [key]: v }
+                                                }
+                                              }));
+                                            }
+                                          }}>
+                                            <option value="">未选择 (Unmapped)</option>
+                                            {activeHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                                          </select>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                          {/* Inline Add Metric Card */}
+                          <div className="space-y-2 pt-2">
+                            <label className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">新增基础指标</label>
+                            {isAddingMetric ? (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  autoFocus
+                                  className="flex-1 min-w-0 bg-slate-900 border-2 border-indigo-400 rounded-2xl p-3 text-[11px] font-black outline-none shadow-lg text-white"
+                                  placeholder="输入指标名称..."
+                                  value={newMetricName}
+                                  onChange={e => setNewMetricName(e.target.value)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') handleAddMetric();
+                                    if (e.key === 'Escape') setIsAddingMetric(false);
+                                  }}
+                                />
+                                <button onClick={handleAddMetric} className="bg-indigo-600 text-white p-3 rounded-2xl hover:bg-indigo-700 shadow-md">
+                                  <Check size={14} />
+                                </button>
+                                <button onClick={() => setIsAddingMetric(false)} className="bg-slate-800 text-slate-400 p-3 rounded-2xl hover:bg-slate-700">
+                                  <X size={14} />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setIsAddingMetric(true)}
+                                className="w-full border-2 border-dashed border-slate-700 rounded-2xl p-4 flex items-center justify-center gap-2 text-slate-400 hover:border-indigo-400 hover:text-indigo-400 hover:bg-indigo-900/20 transition-all text-[11px] font-black"
+                              >
+                                <Plus size={14} /> 新增对齐指标
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
 
-                      {/* Right Side: Dimension Rules（行高参考左侧 NAMING CONVENTION SAMPLE） */}
-                      <div className="lg:col-span-2 space-y-2 max-h-[520px] overflow-y-auto overflow-x-hidden pr-2 custom-scrollbar">
-                        {allDimensions.map(dim => {
-                          const existing = dimConfigs.find(d => d.label === dim);
-                          const currentSource = existing?.source || 'campaign';
-                          const currentDelimiter = existing?.delimiter || '_';
-                          const isColumnSource = ALL_COLUMN_SOURCES.includes(currentSource as ColumnSource);
-                          const isDirect = existing != null && (existing.index === -1 || isColumnSource);
-                          /** 取值方式：直接取值 | 下划线 | 中划线；列维度仅直接取值 */
-                          const segmentStyle = isDirect ? 'direct' : (currentDelimiter === '-' ? '-' : '_');
-                          const sampleStr = (namingSamples as Record<string, string>)[currentSource] ?? '';
-                          const sampleParts = sampleStr ? sampleStr.split(currentDelimiter) : [];
-                          const showIndexDropdown = !isDirect && !isColumnSource;
-                          return (
-                            <div key={dim} className="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-slate-800 rounded-2xl border border-slate-700 shadow-sm group hover:border-purple-700 transition-all relative">
-                              <div className="md:w-36 flex items-center justify-between shrink-0">
-                                <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">{dim}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveDimension(dim)}
-                                  className="shrink-0 flex items-center justify-center w-9 h-9 rounded-xl border-2 border-red-500/40 bg-red-500/10 text-red-400 hover:bg-red-500/25 hover:border-red-500 hover:text-red-300 active:scale-95 transition-all"
-                                  title="删除该维度"
-                                >
-                                  <Trash2 size={16} />
-                                </button>
+                      {/* Right: Formula Config */}
+                      <div className="bg-slate-900/50 border border-slate-800 rounded-[40px] p-10 shadow-2xl space-y-8 flex flex-col">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-xl font-black flex items-center gap-4 text-white"><Calculator className="text-indigo-400" /> 公式字段配置</h3>
+                          <button className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-[10px] font-black hover:bg-indigo-700 transition" onClick={() => openFormulaModal()}>+ 新增公式</button>
+                        </div>
+                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 flex-1 content-start">
+                          {formulas.map(f => {
+                            const scope = inferFormulaPlatformScope(f.formula);
+                            return (
+                              <div key={f.id} className="p-6 bg-slate-800 rounded-3xl border border-slate-700 flex items-center justify-between group">
+                                <div>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{f.name}</p>
+                                    <span className={`text-[7px] px-1.5 py-0.5 rounded-full font-black ${scope === 'Meta' ? 'bg-blue-900/50 text-blue-300 border border-blue-800' : 'bg-emerald-900/50 text-emerald-300 border border-emerald-800'}`}>
+                                      {scope}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs font-mono font-bold text-slate-200">{f.formula}</p>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <button onClick={() => openFormulaModal(f)} className="p-2 bg-slate-900 rounded-lg shadow-sm text-slate-400 hover:text-indigo-400 transition"><Edit3 size={14} /></button>
+                                  {!f.isDefault && <button onClick={() => setFormulas(formulas.filter(x => x.id !== f.id))} className="p-2 bg-slate-900 rounded-lg shadow-sm text-slate-400 hover:text-red-500 transition"><Trash2 size={14} /></button>}
+                                </div>
                               </div>
-                              <div className="grid grid-cols-12 gap-2 flex-1 w-full min-w-0">
-                                <select className="col-span-12 lg:col-span-5 min-w-0 bg-slate-900 text-[10px] font-black px-3 py-2.5 rounded-xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.source || ''} onChange={e => {
-                                  const source = e.target.value as any;
-                                  if (source) setDimConfigs(p => [...p.filter(x => x.label !== dim), { label: dim, source, index: ALL_COLUMN_SOURCES.includes(source) ? -1 : (existing?.index ?? 0), delimiter: existing?.delimiter || '_' }]);
-                                }}>
-                                  <option value="">来源字段 (Source)</option>
-                                  <option value="campaign">Campaign (Naming)</option>
-                                  <option value="adSet">Ad Set (Naming)</option>
-                                  <option value="ad">Ad (Naming)</option>
-                                  <option value="age">Age</option>
-                                  <option value="gender">Gender</option>
-                                  <option value="platform">Platform</option>
-                                  <optgroup label="Meta 层级 Segment">
-                                    <option value="country">Country</option>
-                                  </optgroup>
-                                  <optgroup label="Google Search 列维度">
-                                    <option value="searchKeyword">Search keyword</option>
-                                    <option value="searchTerm">Search term</option>
-                                  </optgroup>
-                                  <optgroup label="Google Demand Gen 列维度">
-                                    <option value="adStatus">Ad status</option>
-                                    <option value="adType">Ad type</option>
-                                    <option value="devicePreference">Device preference</option>
-                                    <option value="headline">Headline</option>
-                                    <option value="longHeadline">Long headline</option>
-                                    <option value="description">Description</option>
-                                    <option value="businessName">Business name</option>
-                                    <option value="imageId">Image ID</option>
-                                    <option value="squareImageId">Square image ID</option>
-                                    <option value="portraitImageId">Portrait image ID</option>
-                                    <option value="logoImageId">Logo ID</option>
-                                    <option value="landscapeLogoId">Landscape logo ID</option>
-                                    <option value="videoId">Video ID</option>
-                                    <option value="callToActionText">Call to action text</option>
-                                    <option value="callToActionHeadline">Call to action headline</option>
-                                    <option value="finalUrl">Final URL</option>
-                                    <option value="appFinalUrl">Mobile final URL</option>
-                                    <option value="displayUrl">Display URL</option>
-                                    <option value="trackingUrlTemplate">Tracking template</option>
-                                    <option value="finalUrlSuffix">Final URL suffix</option>
-                                    <option value="customerParam">Custom parameter</option>
-                                  </optgroup>
-                                </select>
-                                <select className={`${showIndexDropdown ? 'col-span-6 lg:col-span-3' : 'col-span-12 lg:col-span-7'} min-w-0 bg-slate-900 text-[10px] font-black px-2 py-2.5 rounded-xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-center text-white`} value={segmentStyle} onChange={e => {
-                                  const v = e.target.value;
-                                  if (v === 'direct') {
-                                    if (existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, index: -1 }]);
-                                    else setDimConfigs(p => [...p, { label: dim, source: currentSource as any, index: -1, delimiter: '_' }]);
-                                  } else {
-                                    const delimiter = v as string;
-                                    const index = existing && existing.index !== -1 ? existing.index : 0;
-                                    if (existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, delimiter, index }]);
-                                    else setDimConfigs(p => [...p, { label: dim, source: currentSource as any, index, delimiter }]);
-                                  }
-                                }}>
-                                  <option value="direct">直接取值</option>
-                                  <option value="_">_ (下划线 | Underscore)</option>
-                                  <option value="-">- (中划线 | Hyphen)</option>
-                                </select>
-                                {showIndexDropdown && (
-                                  <select className="col-span-6 lg:col-span-4 min-w-0 bg-slate-900 text-[10px] font-black px-2 py-2.5 rounded-xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.index ?? 0} onChange={e => {
-                                    const index = parseInt(e.target.value, 10);
-                                    if (!isNaN(index) && existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, index }]);
-                                    else if (!isNaN(index)) setDimConfigs(p => [...p, { label: dim, source: currentSource as any, index, delimiter: currentDelimiter }]);
-                                  }}>
-                                    {sampleParts.length > 0 ? (
-                                      sampleParts.map((part, i) => (
-                                        <option key={i} value={i}>Part {i} ({part})</option>
-                                      ))
-                                    ) : (
-                                      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => <option key={i} value={i}>{i}</option>)
-                                    )}
-                                  </select>
-                                )}
-                              </div>
+                            );
+                          })}
+                          {formulas.length === 0 && (
+                            <div className="h-full flex flex-col items-center justify-center text-slate-500 opacity-50 space-y-2 py-12 border-2 border-dashed border-slate-800 rounded-3xl">
+                              <Calculator size={32} />
+                              <p className="text-xs font-bold">暂无公式，点击右上角添加</p>
                             </div>
-                          );
-                        })}
-
-                        <div className="p-1">
-                          {isAddingDimension ? (
-                            <div className="flex items-center gap-2 p-3 bg-slate-800 rounded-2xl border-2 border-indigo-700 border-dashed animate-in fade-in zoom-in duration-300">
-                              <span className="md:w-28 text-[9px] font-black text-indigo-400 uppercase tracking-widest shrink-0">New Dimension</span>
-                              <div className="flex flex-1 gap-2 min-w-0">
-                                <input
-                                  autoFocus
-                                  className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-[10px] font-black outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-900/20 transition-all text-white"
-                                  placeholder="输入自定义维度名称..."
-                                  value={newDimensionName}
-                                  onChange={e => setNewDimensionName(e.target.value)}
-                                  onKeyDown={e => {
-                                    if (e.key === 'Enter') handleAddDimension();
-                                    if (e.key === 'Escape') setIsAddingDimension(false);
-                                  }}
-                                />
-                                <button onClick={handleAddDimension} className="bg-indigo-600 text-white px-4 py-2.5 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-900/20 transition-all font-black text-[10px] min-w-[64px] shrink-0">确认</button>
-                                <button onClick={() => setIsAddingDimension(false)} className="bg-slate-900 text-slate-400 px-4 py-2.5 rounded-xl hover:bg-slate-800 border border-slate-700 transition-all font-black text-[10px] min-w-[64px] shrink-0">取消</button>
-                              </div>
-                            </div>
-                          ) : (
-                            <button onClick={() => setIsAddingDimension(true)} className="w-full py-3 border-2 border-dashed border-slate-700 rounded-2xl flex items-center justify-center gap-2 text-slate-400 hover:text-indigo-400 hover:border-indigo-700 hover:bg-indigo-900/20 transition-all font-black text-[10px] uppercase tracking-widest group">
-                              <Plus size={16} className="group-hover:scale-110 transition-transform" /> 增加自定义维度
-                            </button>
                           )}
                         </div>
                       </div>
                     </div>
+                  )}
 
-                  </div>
+                  {/* Bottom Row: Dimensions */}
+                  {mappingTab === 'dimensions' && (
+                    <div className="bg-slate-900/50 border border-slate-800 rounded-[40px] p-10 shadow-2xl space-y-10">
+                      <div>
+                        <h3 className="text-2xl font-black flex items-center gap-4 text-white"><Split className="text-purple-400" /> 维度参数配置</h3>
+                      </div>
+
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        {/* Left Side: Samples */}
+                        <div className="lg:col-span-1 bg-slate-800 rounded-3xl p-6 space-y-6 border border-slate-700 shadow-inner h-fit">
+                          <div className="flex items-center justify-between">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2"><TableIcon size={12} /> NAMING CONVENTION SAMPLES</p>
+                          </div>
+
+                          {/* Platform Selector */}
+                          <div className="flex bg-slate-900 p-1 rounded-xl">
+                            {['facebook', 'google'].map(p => (
+                              <button
+                                key={p}
+                                onClick={() => setActivePlatformTab(p as any)}
+                                className={`flex-1 px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${activePlatformTab === p ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
+                              >
+                                {p === 'facebook' ? 'Meta' : 'Google'}
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* Google Type Selector */}
+                          {activePlatformTab === 'google' && (
+                            <div className="space-y-2">
+                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Google Ad Type</p>
+                              <div className="flex flex-col gap-1.5">
+                                {GOOGLE_TYPES.map(t => (
+                                  <button
+                                    key={t}
+                                    onClick={() => setActiveGoogleType(t)}
+                                    className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all text-left ${activeGoogleType === t ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 bg-slate-900 hover:text-slate-200 hover:bg-slate-900/70'}`}
+                                  >
+                                    {t.replace('_', ' ')}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Segment 数据层级选择 */}
+                          <div className="space-y-2">
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Segment 数据层级</p>
+                            <div className="flex flex-col gap-1.5">
+                              {getSegmentOptions(activePlatformTab, activePlatformTab === 'google' ? activeGoogleType : undefined).map(opt => (
+                                <button
+                                  key={opt.key}
+                                  onClick={() => setActiveSegment(opt.key)}
+                                  className={`px-3 py-2 rounded-lg text-[9px] font-black transition-all text-left ${activeSegment === opt.key ? 'bg-purple-600 text-white shadow-md' : 'text-slate-400 bg-slate-900 hover:text-slate-200 hover:bg-slate-900/70'}`}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            {/* 通用：Campaign Name / Ad Set Name / Ad Name（所有平台/类型） */}
+                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Campaign Name Sample</label>
+                              <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.campaign}>{namingSamples.campaign || 'N/A'}</div>
+                            </div>
+                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Ad Set Name Sample</label>
+                              <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.adSet}>{namingSamples.adSet || 'N/A'}</div>
+                            </div>
+                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Ad Name Sample</label>
+                              <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.ad}>{namingSamples.ad || 'N/A'}</div>
+                            </div>
+
+                            {/* Google Search 专属：Search keyword / Search term */}
+                            {activePlatformTab === 'google' && activeGoogleType === 'SEARCH' && (
+                              <>
+                                <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                                  <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Search keyword</label>
+                                  <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={(namingSamples as Record<string, string>).searchKeyword}>{(namingSamples as Record<string, string>).searchKeyword || 'N/A'}</div>
+                                </div>
+                                <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                                  <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Search term</label>
+                                  <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={(namingSamples as Record<string, string>).searchTerm}>{(namingSamples as Record<string, string>).searchTerm || 'N/A'}</div>
+                                </div>
+                              </>
+                            )}
+
+                            {/* 通用：age / gender（所有平台/类型均展示） */}
+                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Age</label>
+                              <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.age}>{namingSamples.age || 'N/A'}</div>
+                            </div>
+                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Gender</label>
+                              <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.gender}>{namingSamples.gender || 'N/A'}</div>
+                            </div>
+
+                            {/* Facebook 专属：Country（所有 segment 下均显示） */}
+                            {activePlatformTab === 'facebook' && (
+                              <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                                <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Country</label>
+                                <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={(namingSamples as Record<string, string>).country}>{(namingSamples as Record<string, string>).country || 'N/A'}</div>
+                              </div>
+                            )}
+
+                            {/* Google Demand Gen 专属：全部列维度样本 */}
+                            {activePlatformTab === 'google' && activeGoogleType === 'DEMAND_GEN' && (
+                              <div className="space-y-2 max-h-[320px] overflow-y-auto custom-scrollbar">
+                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest sticky top-0 bg-slate-800 py-1">Demand Gen 列维度样本</p>
+                                {(['adStatus', 'adType', 'devicePreference', 'headline', 'longHeadline', 'description', 'businessName', 'imageId', 'squareImageId', 'portraitImageId', 'logoImageId', 'landscapeLogoId', 'videoId', 'callToActionText', 'callToActionHeadline', 'finalUrl', 'appFinalUrl', 'displayUrl', 'trackingUrlTemplate', 'finalUrlSuffix', 'customerParam'] as const).map(src => (
+                                  <div key={src} className="bg-slate-900/50 p-2 rounded-xl border border-slate-800">
+                                    <label className="text-[8px] font-black text-slate-500 uppercase block mb-0.5">{getColumnNameForSource(src)}</label>
+                                    <div className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap" title={(namingSamples as Record<string, string>)[src]}>{(namingSamples as Record<string, string>)[src] || 'N/A'}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Right Side: Dimension Rules（行高参考左侧 NAMING CONVENTION SAMPLE） */}
+                        <div className="lg:col-span-2 space-y-2 max-h-[520px] overflow-y-auto overflow-x-hidden pr-2 custom-scrollbar">
+                          {allDimensions.map(dim => {
+                            const existing = dimConfigs.find(d => d.label === dim);
+                            const currentSource = existing?.source || 'campaign';
+                            const currentDelimiter = existing?.delimiter || '_';
+                            const isColumnSource = ALL_COLUMN_SOURCES.includes(currentSource as ColumnSource);
+                            const isDirect = existing != null && (existing.index === -1 || isColumnSource);
+                            /** 取值方式：直接取值 | 下划线 | 中划线；列维度仅直接取值 */
+                            const segmentStyle = isDirect ? 'direct' : (currentDelimiter === '-' ? '-' : '_');
+                            const sampleStr = (namingSamples as Record<string, string>)[currentSource] ?? '';
+                            const sampleParts = sampleStr ? sampleStr.split(currentDelimiter) : [];
+                            const showIndexDropdown = !isDirect && !isColumnSource;
+                            return (
+                              <div key={dim} className="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-slate-800 rounded-2xl border border-slate-700 shadow-sm group hover:border-purple-700 transition-all relative">
+                                <div className="md:w-36 flex items-center justify-between shrink-0">
+                                  <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">{dim}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveDimension(dim)}
+                                    className="shrink-0 flex items-center justify-center w-9 h-9 rounded-xl border-2 border-red-500/40 bg-red-500/10 text-red-400 hover:bg-red-500/25 hover:border-red-500 hover:text-red-300 active:scale-95 transition-all"
+                                    title="删除该维度"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
+                                <div className="grid grid-cols-12 gap-2 flex-1 w-full min-w-0">
+                                  <select className="col-span-12 lg:col-span-5 min-w-0 bg-slate-900 text-[10px] font-black px-3 py-2.5 rounded-xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.source || ''} onChange={e => {
+                                    const source = e.target.value as any;
+                                    if (source) setDimConfigs(p => [...p.filter(x => x.label !== dim), { label: dim, source, index: ALL_COLUMN_SOURCES.includes(source) ? -1 : (existing?.index ?? 0), delimiter: existing?.delimiter || '_' }]);
+                                  }}>
+                                    <option value="">来源字段 (Source)</option>
+                                    <option value="campaign">Campaign (Naming)</option>
+                                    <option value="adSet">Ad Set (Naming)</option>
+                                    <option value="ad">Ad (Naming)</option>
+                                    <option value="age">Age</option>
+                                    <option value="gender">Gender</option>
+                                    <option value="platform">Platform</option>
+                                    <optgroup label="Meta 层级 Segment">
+                                      <option value="country">Country</option>
+                                    </optgroup>
+                                    <optgroup label="Google Search 列维度">
+                                      <option value="searchKeyword">Search keyword</option>
+                                      <option value="searchTerm">Search term</option>
+                                    </optgroup>
+                                    <optgroup label="Google Demand Gen 列维度">
+                                      <option value="adStatus">Ad status</option>
+                                      <option value="adType">Ad type</option>
+                                      <option value="devicePreference">Device preference</option>
+                                      <option value="headline">Headline</option>
+                                      <option value="longHeadline">Long headline</option>
+                                      <option value="description">Description</option>
+                                      <option value="businessName">Business name</option>
+                                      <option value="imageId">Image ID</option>
+                                      <option value="squareImageId">Square image ID</option>
+                                      <option value="portraitImageId">Portrait image ID</option>
+                                      <option value="logoImageId">Logo ID</option>
+                                      <option value="landscapeLogoId">Landscape logo ID</option>
+                                      <option value="videoId">Video ID</option>
+                                      <option value="callToActionText">Call to action text</option>
+                                      <option value="callToActionHeadline">Call to action headline</option>
+                                      <option value="finalUrl">Final URL</option>
+                                      <option value="appFinalUrl">Mobile final URL</option>
+                                      <option value="displayUrl">Display URL</option>
+                                      <option value="trackingUrlTemplate">Tracking template</option>
+                                      <option value="finalUrlSuffix">Final URL suffix</option>
+                                      <option value="customerParam">Custom parameter</option>
+                                    </optgroup>
+                                  </select>
+                                  <select className={`${showIndexDropdown ? 'col-span-6 lg:col-span-3' : 'col-span-12 lg:col-span-7'} min-w-0 bg-slate-900 text-[10px] font-black px-2 py-2.5 rounded-xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-center text-white`} value={segmentStyle} onChange={e => {
+                                    const v = e.target.value;
+                                    if (v === 'direct') {
+                                      if (existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, index: -1 }]);
+                                      else setDimConfigs(p => [...p, { label: dim, source: currentSource as any, index: -1, delimiter: '_' }]);
+                                    } else {
+                                      const delimiter = v as string;
+                                      const index = existing && existing.index !== -1 ? existing.index : 0;
+                                      if (existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, delimiter, index }]);
+                                      else setDimConfigs(p => [...p, { label: dim, source: currentSource as any, index, delimiter }]);
+                                    }
+                                  }}>
+                                    <option value="direct">直接取值</option>
+                                    <option value="_">_ (下划线 | Underscore)</option>
+                                    <option value="-">- (中划线 | Hyphen)</option>
+                                  </select>
+                                  {showIndexDropdown && (
+                                    <select className="col-span-6 lg:col-span-4 min-w-0 bg-slate-900 text-[10px] font-black px-2 py-2.5 rounded-xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.index ?? 0} onChange={e => {
+                                      const index = parseInt(e.target.value, 10);
+                                      if (!isNaN(index) && existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, index }]);
+                                      else if (!isNaN(index)) setDimConfigs(p => [...p, { label: dim, source: currentSource as any, index, delimiter: currentDelimiter }]);
+                                    }}>
+                                      {sampleParts.length > 0 ? (
+                                        sampleParts.map((part, i) => (
+                                          <option key={i} value={i}>Part {i} ({part})</option>
+                                        ))
+                                      ) : (
+                                        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => <option key={i} value={i}>{i}</option>)
+                                      )}
+                                    </select>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          <div className="p-1">
+                            {isAddingDimension ? (
+                              <div className="flex items-center gap-2 p-3 bg-slate-800 rounded-2xl border-2 border-indigo-700 border-dashed animate-in fade-in zoom-in duration-300">
+                                <span className="md:w-28 text-[9px] font-black text-indigo-400 uppercase tracking-widest shrink-0">New Dimension</span>
+                                <div className="flex flex-1 gap-2 min-w-0">
+                                  <input
+                                    autoFocus
+                                    className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-[10px] font-black outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-900/20 transition-all text-white"
+                                    placeholder="输入自定义维度名称..."
+                                    value={newDimensionName}
+                                    onChange={e => setNewDimensionName(e.target.value)}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') handleAddDimension();
+                                      if (e.key === 'Escape') setIsAddingDimension(false);
+                                    }}
+                                  />
+                                  <button onClick={handleAddDimension} className="bg-indigo-600 text-white px-4 py-2.5 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-900/20 transition-all font-black text-[10px] min-w-[64px] shrink-0">确认</button>
+                                  <button onClick={() => setIsAddingDimension(false)} className="bg-slate-900 text-slate-400 px-4 py-2.5 rounded-xl hover:bg-slate-800 border border-slate-700 transition-all font-black text-[10px] min-w-[64px] shrink-0">取消</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button onClick={() => setIsAddingDimension(true)} className="w-full py-3 border-2 border-dashed border-slate-700 rounded-2xl flex items-center justify-center gap-2 text-slate-400 hover:text-indigo-400 hover:border-indigo-700 hover:bg-indigo-900/20 transition-all font-black text-[10px] uppercase tracking-widest group">
+                                <Plus size={16} className="group-hover:scale-110 transition-transform" /> 增加自定义维度
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                    </div>
                   )}
 
                   {/* Data Quality Report */}
                   {mappingTab === 'quality' && (
-                  <div className="space-y-8">
-                    {/* Top Stats */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                      <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6">
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">总数据量</p>
-                        <p className="text-3xl font-black text-white mt-3">{qualityStats.total.toLocaleString()}</p>
-                      </div>
-                      <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6">
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">匹配成功</p>
-                        <p className="text-3xl font-black text-emerald-400 mt-3">{qualityStats.matched.toLocaleString()}</p>
-                        <p className="text-[11px] font-black text-emerald-300/80 mt-2">{(qualityStats.matchRate * 100).toFixed(1)}%</p>
-                      </div>
-                      <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6">
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">匹配失败</p>
-                        <p className="text-3xl font-black text-amber-400 mt-3">{qualityStats.unmatched.toLocaleString()}</p>
-                        <p className="text-[11px] font-black text-amber-300/80 mt-2">{((1 - qualityStats.matchRate) * 100).toFixed(1)}%</p>
-                      </div>
-                    </div>
-
-                    {/* Overall Progress Bar */}
-                    <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6">
-                      <div className="flex items-center justify-between mb-3">
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">整体匹配率</p>
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs font-black text-slate-300">{(qualityStats.matchRate * 100).toFixed(1)}%</span>
-                          <button
-                            onClick={() => setIsRulesModalOpen(true)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-[10px] font-bold text-slate-300 hover:text-white transition-all"
-                            title="查看匹配规则说明"
-                          >
-                            <HelpCircle size={12} />
-                            规则说明
-                          </button>
+                    <div className="space-y-8">
+                      {/* Top Stats */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">总数据量</p>
+                          <p className="text-3xl font-black text-white mt-3">{qualityStats.total.toLocaleString()}</p>
+                        </div>
+                        <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">匹配成功</p>
+                          <p className="text-3xl font-black text-emerald-400 mt-3">{qualityStats.matched.toLocaleString()}</p>
+                          <p className="text-[11px] font-black text-emerald-300/80 mt-2">{(qualityStats.matchRate * 100).toFixed(1)}%</p>
+                        </div>
+                        <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">匹配失败</p>
+                          <p className="text-3xl font-black text-amber-400 mt-3">{qualityStats.unmatched.toLocaleString()}</p>
+                          <p className="text-[11px] font-black text-amber-300/80 mt-2">{((1 - qualityStats.matchRate) * 100).toFixed(1)}%</p>
                         </div>
                       </div>
-                      <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
-                        <div 
-                          className={`h-full transition-all duration-500 ${qualityStats.matchRate >= 0.95 ? 'bg-emerald-500' : qualityStats.matchRate >= 0.8 ? 'bg-yellow-500' : 'bg-red-500'}`} 
-                          style={{ width: `${Math.round(qualityStats.matchRate * 100)}%` }} 
-                        />
-                      </div>
-                    </div>
 
-                    {/* Main Content: Left Sidebar + Right Details */}
-                    {baseProcessedData.length === 0 && (
-                      <div className="bg-slate-800/60 border border-slate-700 rounded-3xl p-8 text-center text-slate-400 text-sm font-bold">
-                        暂无数据，请先获取广告数据
-                      </div>
-                    )}
-
-                    {baseProcessedData.length > 0 && qualityDimensionLabels.length === 0 && (
-                      <div className="bg-slate-800/60 border border-slate-700 rounded-3xl p-8 text-center text-slate-400 text-sm font-bold">
-                        暂未配置维度，请先在维度参数配置中设置规则
-                      </div>
-                    )}
-
-                    {baseProcessedData.length > 0 && qualityDimensionLabels.length > 0 && (
-                      <div className="flex gap-6 h-[600px]">
-                        {/* Left Sidebar: Dimension List */}
-                        <div className="w-60 flex-shrink-0 bg-slate-900/50 border border-slate-800 rounded-3xl flex flex-col overflow-hidden">
-                          <div className="p-4 border-b border-slate-800">
-                            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                              <Target size={12} className="text-purple-400" /> 维度列表
-                            </h4>
-                          </div>
-                          <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
-                            {dimensionMatchStats.map(stat => {
-                              const isSelected = selectedQualityDimension === stat.label;
-                              const colorClass = stat.matchRate >= 0.95 ? 'text-emerald-400' : stat.matchRate >= 0.8 ? 'text-yellow-400' : 'text-red-400';
-                              const bgClass = stat.matchRate >= 0.95 ? 'bg-emerald-500/10' : stat.matchRate >= 0.8 ? 'bg-yellow-500/10' : 'bg-red-500/10';
-                              
-                              return (
-                                <button
-                                  key={stat.label}
-                                  onClick={() => setSelectedQualityDimension(stat.label)}
-                                  className={`w-full p-3 rounded-2xl text-left transition-all ${
-                                    isSelected 
-                                      ? 'bg-indigo-600 text-white shadow-lg' 
-                                      : `${bgClass} text-slate-300 hover:bg-slate-800`
-                                  }`}
-                                >
-                                  <div className="flex items-center justify-between mb-1">
-                                    <span className="text-[11px] font-black">{stat.label}</span>
-                                    {stat.matchRate < 0.8 && !isSelected && (
-                                      <AlertTriangle size={12} className="text-red-400" />
-                                    )}
-                                  </div>
-                                  <div className={`text-xl font-black ${isSelected ? 'text-white' : colorClass}`}>
-                                    {(stat.matchRate * 100).toFixed(1)}%
-                                  </div>
-                                  <div className={`text-[10px] font-bold mt-1 ${isSelected ? 'text-indigo-200' : 'text-slate-500'}`}>
-                                    {stat.missing.toLocaleString()} 条缺失
-                                  </div>
-                                </button>
-                              );
-                            })}
+                      {/* Overall Progress Bar */}
+                      <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6">
+                        <div className="flex items-center justify-between mb-3">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">整体匹配率</p>
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs font-black text-slate-300">{(qualityStats.matchRate * 100).toFixed(1)}%</span>
+                            <button
+                              onClick={() => setIsRulesModalOpen(true)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-[10px] font-bold text-slate-300 hover:text-white transition-all"
+                              title="查看匹配规则说明"
+                            >
+                              <HelpCircle size={12} />
+                              规则说明
+                            </button>
                           </div>
                         </div>
+                        <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-500 ${qualityStats.matchRate >= 0.95 ? 'bg-emerald-500' : qualityStats.matchRate >= 0.8 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                            style={{ width: `${Math.round(qualityStats.matchRate * 100)}%` }}
+                          />
+                        </div>
+                      </div>
 
-                        {/* Right: Details for Selected Dimension */}
-                        <div className="flex-1 bg-slate-900/50 border border-slate-800 rounded-3xl flex flex-col overflow-hidden">
-                          {/* Header */}
-                          <div className="p-4 border-b border-slate-800">
-                            <div className="flex flex-col md:flex-row md:items-center gap-4">
-                              <div className="flex-1 relative">
-                                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                                <input
-                                  type="text"
-                                  placeholder="搜索 Campaign Name..."
-                                  className="w-full pl-9 pr-4 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                                  value={qualitySearchTerm}
-                                  onChange={e => setQualitySearchTerm(e.target.value)}
-                                />
-                              </div>
-                              <select 
-                                className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                value={qualityPlatformFilter}
-                                onChange={e => setQualityPlatformFilter(e.target.value as any)}
-                              >
-                                <option value="all">全部平台</option>
-                                <option value="facebook">Meta</option>
-                                <option value="google">Google</option>
-                              </select>
-                              <select 
-                                className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                value={qualitySort}
-                                onChange={e => setQualitySort(e.target.value as any)}
-                              >
-                                <option value="cost_desc">按花费降序</option>
-                                <option value="date_desc">按日期降序</option>
-                              </select>
+                      {/* Main Content: Left Sidebar + Right Details */}
+                      {baseProcessedData.length === 0 && (
+                        <div className="bg-slate-800/60 border border-slate-700 rounded-3xl p-8 text-center text-slate-400 text-sm font-bold">
+                          暂无数据，请先获取广告数据
+                        </div>
+                      )}
+
+                      {baseProcessedData.length > 0 && qualityDimensionLabels.length === 0 && (
+                        <div className="bg-slate-800/60 border border-slate-700 rounded-3xl p-8 text-center text-slate-400 text-sm font-bold">
+                          暂未配置维度，请先在维度参数配置中设置规则
+                        </div>
+                      )}
+
+                      {baseProcessedData.length > 0 && qualityDimensionLabels.length > 0 && (
+                        <div className="flex gap-6 h-[600px]">
+                          {/* Left Sidebar: Dimension List */}
+                          <div className="w-60 flex-shrink-0 bg-slate-900/50 border border-slate-800 rounded-3xl flex flex-col overflow-hidden">
+                            <div className="p-4 border-b border-slate-800">
+                              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                <Target size={12} className="text-purple-400" /> 维度列表
+                              </h4>
                             </div>
-                            <div className="mt-3 flex items-center justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                              <span>未匹配数据 · {selectedQualityDimension}</span>
-                              <span>{filteredQualityData.length.toLocaleString()} 条</span>
-                            </div>
-                          </div>
+                            <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
+                              {dimensionMatchStats.map(stat => {
+                                const isSelected = selectedQualityDimension === stat.label;
+                                const colorClass = stat.matchRate >= 0.95 ? 'text-emerald-400' : stat.matchRate >= 0.8 ? 'text-yellow-400' : 'text-red-400';
+                                const bgClass = stat.matchRate >= 0.95 ? 'bg-emerald-500/10' : stat.matchRate >= 0.8 ? 'bg-yellow-500/10' : 'bg-red-500/10';
 
-                          {/* List */}
-                          <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                            {filteredQualityData.length === 0 && (
-                              <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                                <CheckSquare className="w-12 h-12 mb-2 opacity-20" />
-                                <p className="text-sm font-medium">暂无未匹配数据</p>
-                              </div>
-                            )}
-
-                            {filteredQualityData.slice(0, 100).map((item, idx) => (
-                              <div 
-                                key={`${item.date}_${idx}`} 
-                                className="bg-slate-800/70 border border-slate-700 rounded-2xl p-4 hover:border-slate-600 transition-all"
-                              >
-                                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                                  <div className="space-y-1 min-w-0 flex-1">
-                                    <p className="text-xs font-black text-white truncate" title={item.campaignName}>
-                                      {item.campaignName}
-                                    </p>
-                                    <div className="text-[11px] font-bold text-slate-400">
-                                      {item.platform} · {item.date} · 花费 ${item.cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                return (
+                                  <button
+                                    key={stat.label}
+                                    onClick={() => setSelectedQualityDimension(stat.label)}
+                                    className={`w-full p-3 rounded-2xl text-left transition-all ${isSelected
+                                        ? 'bg-indigo-600 text-white shadow-lg'
+                                        : `${bgClass} text-slate-300 hover:bg-slate-800`
+                                      }`}
+                                  >
+                                    <div className="flex items-center justify-between mb-1">
+                                      <span className="text-[11px] font-black">{stat.label}</span>
+                                      {stat.matchRate < 0.8 && !isSelected && (
+                                        <AlertTriangle size={12} className="text-red-400" />
+                                      )}
                                     </div>
-                                    <div className="text-[11px] font-black text-amber-300">
-                                      缺失维度：{selectedQualityDimension}
+                                    <div className={`text-xl font-black ${isSelected ? 'text-white' : colorClass}`}>
+                                      {(stat.matchRate * 100).toFixed(1)}%
+                                    </div>
+                                    <div className={`text-[10px] font-bold mt-1 ${isSelected ? 'text-indigo-200' : 'text-slate-500'}`}>
+                                      {stat.missing.toLocaleString()} 条缺失
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Right: Details for Selected Dimension */}
+                          <div className="flex-1 bg-slate-900/50 border border-slate-800 rounded-3xl flex flex-col overflow-hidden">
+                            {/* Header */}
+                            <div className="p-4 border-b border-slate-800">
+                              <div className="flex flex-col md:flex-row md:items-center gap-4">
+                                <div className="flex-1 relative">
+                                  <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                                  <input
+                                    type="text"
+                                    placeholder="搜索 Campaign Name..."
+                                    className="w-full pl-9 pr-4 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                                    value={qualitySearchTerm}
+                                    onChange={e => setQualitySearchTerm(e.target.value)}
+                                  />
+                                </div>
+                                <select
+                                  className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                  value={qualityPlatformFilter}
+                                  onChange={e => setQualityPlatformFilter(e.target.value as any)}
+                                >
+                                  <option value="all">全部平台</option>
+                                  <option value="facebook">Meta</option>
+                                  <option value="google">Google</option>
+                                </select>
+                                <select
+                                  className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                  value={qualitySort}
+                                  onChange={e => setQualitySort(e.target.value as any)}
+                                >
+                                  <option value="cost_desc">按花费降序</option>
+                                  <option value="date_desc">按日期降序</option>
+                                </select>
+                              </div>
+                              <div className="mt-3 flex items-center justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                <span>未匹配数据 · {selectedQualityDimension}</span>
+                                <span>{filteredQualityData.length.toLocaleString()} 条</span>
+                              </div>
+                            </div>
+
+                            {/* List */}
+                            <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                              {filteredQualityData.length === 0 && (
+                                <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                                  <CheckSquare className="w-12 h-12 mb-2 opacity-20" />
+                                  <p className="text-sm font-medium">暂无未匹配数据</p>
+                                </div>
+                              )}
+
+                              {filteredQualityData.slice(0, 100).map((item, idx) => (
+                                <div
+                                  key={`${item.date}_${idx}`}
+                                  className="bg-slate-800/70 border border-slate-700 rounded-2xl p-4 hover:border-slate-600 transition-all"
+                                >
+                                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                                    <div className="space-y-1 min-w-0 flex-1">
+                                      <p className="text-xs font-black text-white truncate" title={item.campaignName}>
+                                        {item.campaignName}
+                                      </p>
+                                      <div className="text-[11px] font-bold text-slate-400">
+                                        {item.platform} · {item.date} · 花费 ${item.cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </div>
+                                      <div className="text-[11px] font-black text-amber-300">
+                                        缺失维度：{selectedQualityDimension}
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
-                              </div>
-                            ))}
+                              ))}
 
-                            {filteredQualityData.length > 100 && (
-                              <div className="text-center text-[10px] font-black text-slate-500 uppercase tracking-widest py-4">
-                                仅展示前 100 条，请使用搜索和筛选功能
-                              </div>
-                            )}
+                              {filteredQualityData.length > 100 && (
+                                <div className="text-center text-[10px] font-black text-slate-500 uppercase tracking-widest py-4">
+                                  仅展示前 100 条，请使用搜索和筛选功能
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
@@ -4699,16 +4863,16 @@ const App = () => {
                       <p className="text-[10px] font-black text-slate-500 uppercase mb-2">Campaign Name 示例</p>
                       <p className="text-sm font-mono text-emerald-400 break-all">{namingSamples.campaign}</p>
                     </div>
-                    
-                        {dimConfigs.filter(c => c.source === 'campaign' && c.source !== 'platform' && c.source !== 'age' && c.source !== 'gender').length > 0 && (
-                          <div className="space-y-2">
-                            <p className="text-[10px] font-black text-slate-500 uppercase">解析结果</p>
-                            {(() => {
-                              const campaignConf = dimConfigs.find(c => c.source === 'campaign');
-                              const parts = namingSamples.campaign.split(campaignConf?.delimiter || '_');
-                              return dimConfigs
-                                .filter(c => c.source === 'campaign')
-                                .map((conf, idx) => {
+
+                    {dimConfigs.filter(c => c.source === 'campaign' && c.source !== 'platform' && c.source !== 'age' && c.source !== 'gender').length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-black text-slate-500 uppercase">解析结果</p>
+                        {(() => {
+                          const campaignConf = dimConfigs.find(c => c.source === 'campaign');
+                          const parts = namingSamples.campaign.split(campaignConf?.delimiter || '_');
+                          return dimConfigs
+                            .filter(c => c.source === 'campaign')
+                            .map((conf, idx) => {
                               const value = conf.index === -1 ? namingSamples.campaign : (parts[conf.index] ?? 'N/A');
                               const isValid = value !== 'N/A' && value !== '';
                               return (
@@ -4758,7 +4922,7 @@ const App = () => {
             </div>
 
             <div className="mt-6 pt-6 border-t border-slate-800">
-              <button 
+              <button
                 onClick={() => setIsRulesModalOpen(false)}
                 className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black text-sm shadow-xl hover:bg-indigo-700 transition-all active:scale-95"
               >
@@ -4878,16 +5042,16 @@ const App = () => {
         const platformFiltered = rawDataPlatformFilter === 'all'
           ? rawData
           : rawData.filter((r: any) => {
-              const p = String(r.__platform || '').toLowerCase();
-              return rawDataPlatformFilter === 'google' ? p.includes('google') : (p.includes('facebook') || p.includes('meta'));
-            });
+            const p = String(r.__platform || '').toLowerCase();
+            return rawDataPlatformFilter === 'google' ? p.includes('google') : (p.includes('facebook') || p.includes('meta'));
+          });
 
         // 搜索过滤
         const searchLower = rawDataSearch.toLowerCase();
         const searched = searchLower
           ? platformFiltered.filter((r: any) =>
-              Object.entries(r).some(([k, v]) => !EXCLUDED_KEYS.has(k) && String(v ?? '').toLowerCase().includes(searchLower))
-            )
+            Object.entries(r).some(([k, v]) => !EXCLUDED_KEYS.has(k) && String(v ?? '').toLowerCase().includes(searchLower))
+          )
           : platformFiltered;
 
         // 提取全部列名
