@@ -200,19 +200,19 @@ interface PivotPreset {
 
 const PIVOT_PRESETS_STORAGE_PREFIX = 'pivotPresets_';
 
-/** 数据透视可选维度：默认包含 campaign、ad set、ad、gender、age、国家、广告类型、Keyword、Search Term、Asset Group */
-const DEFAULT_PIVOT_DIMENSION_LABELS = ['Campaign', 'Ad Set', 'Ad', 'Gender', 'Age', '国家', '广告类型', 'Keyword', 'Search Term', 'Asset Group'] as const;
+/** 数据透视可选维度：默认包含 Campaign、Ad Set、Ad、Gender、Age、Country、Ad Type、Keyword、Search Term、Asset Group */
+const DEFAULT_PIVOT_DIMENSION_LABELS = ['Campaign', 'Ad Set', 'Ad', 'Gender', 'Age', 'Country', 'Ad Type', 'Keyword', 'Search Term', 'Asset Group'] as const;
 
 /** 维度解析配置：index -1 为直接取值，否则按 delimiter 分段取第 index 段；取值方式（直接取值/下划线/中划线）在配置中统一可选 */
-/** 默认维度：Campaign、Ad Set、Ad、Gender、Age、国家、广告类型、Keyword、Search Term、Asset Group，均默认直接取值并匹配对应字段 */
+/** 默认维度：Campaign、Ad Set、Ad、Gender、Age、Country、Ad Type、Keyword、Search Term、Asset Group，均默认直接取值并匹配对应字段 */
 const DEFAULT_PIVOT_DIM_CONFIGS: DimensionConfig[] = [
   { label: 'Campaign', source: 'campaign', index: -1, delimiter: '_' },
   { label: 'Ad Set', source: 'adSet', index: -1, delimiter: '_' },
   { label: 'Ad', source: 'ad', index: -1, delimiter: '_' },
   { label: 'Gender', source: 'gender', index: -1, delimiter: '_' },
   { label: 'Age', source: 'age', index: -1, delimiter: '_' },
-  { label: '国家', source: 'country', index: -1, delimiter: '_' },
-  { label: '广告类型', source: 'adType', index: -1, delimiter: '_' },
+  { label: 'Country', source: 'country', index: -1, delimiter: '_' },
+  { label: 'Ad Type', source: 'adType', index: -1, delimiter: '_' },
   { label: 'Keyword', source: 'searchKeyword', index: -1, delimiter: '_' },
   { label: 'Search Term', source: 'searchTerm', index: -1, delimiter: '_' },
   { label: 'Asset Group', source: 'adSet', index: -1, delimiter: '_' },
