@@ -1775,11 +1775,15 @@ const App = () => {
     return map;
   }, [formulas]);
 
+  const CURRENCY_BASE_METRICS = new Set(['cost', 'conversionValue']);
   const pivotValueOptions = useMemo(() => {
     return allAvailableMetrics.map(m => {
       const formula = formulaByName.get(m.key);
       const unit = formula?.unit;
-      const format = unit === '$' ? 'currency' : unit === '%' ? 'percent' : 'number';
+      const format = unit === '$' ? 'currency'
+        : unit === '%' ? 'percent'
+        : CURRENCY_BASE_METRICS.has(m.key) ? 'currency'
+        : 'number';
       return { key: m.key, label: m.label, isFormula: !!formula, format };
     });
   }, [allAvailableMetrics, formulaByName]);
@@ -2072,14 +2076,14 @@ const App = () => {
   const formatPivotValue = (val: number | null, key: string) => {
     if (val === null || val === undefined) return '';
     const n = Number(val);
-    // 小数点后为 .00 时显示整数，否则保留小数
     const opts: Intl.NumberFormatOptions = { minimumFractionDigits: 0, maximumFractionDigits: 2 };
     const meta = pivotValueMeta.get(key);
     if (meta?.format === 'currency') {
       return `$${n.toLocaleString(undefined, opts)}`;
     }
     if (meta?.format === 'percent') {
-      return `${n.toLocaleString(undefined, opts)}%`;
+      const pct = n * 100;
+      return `${pct.toLocaleString(undefined, opts)}%`;
     }
     return n.toLocaleString(undefined, opts);
   };
@@ -2675,10 +2679,16 @@ const App = () => {
         return valueKeys.map(vk => `${colLabel} · ${pivotValueMeta.get(vk)?.label || vk}`);
       }),
     ];
+    const formatExportValue = (val: number | null | undefined, key: string) => {
+      if (val === null || val === undefined) return '';
+      const meta = pivotValueMeta.get(key);
+      if (meta?.format === 'percent') return val * 100;
+      return val;
+    };
     const rows = pivotResult.rows.map(r => {
       const rowCells = rowHeaders.map((_, idx) => r.displayCells[idx] || '');
       const values = colKeys.flatMap(colKey =>
-        valueKeys.map(vk => (r.cells[colKey]?.[vk] ?? ''))
+        valueKeys.map(vk => formatExportValue(r.cells[colKey]?.[vk], vk))
       );
       return [...rowCells, ...values];
     });
