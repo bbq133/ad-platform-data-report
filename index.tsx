@@ -3179,7 +3179,9 @@ const App = () => {
                                 }}
                               >
                                 <span className="inline-flex items-center gap-1">
-                                  {pivotResult.colLabels[colKey]}
+                                  {colKey === '__all__'
+                                    ? (pivotValueMeta.get(pivotResult.valueKeys[0])?.label || pivotResult.valueKeys[0])
+                                    : pivotResult.colLabels[colKey]}
                                   {pivotSort?.colKey === colKey && pivotSort?.valueKey === pivotResult.valueKeys[0] && (pivotSort.dir === 'asc' ? <ChevronUp size={12} className="opacity-80" /> : <ChevronDown size={12} className="opacity-80" />)}
                                 </span>
                               </th>
