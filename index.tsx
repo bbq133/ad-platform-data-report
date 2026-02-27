@@ -50,7 +50,8 @@ import {
   Save,
   AlertTriangle,
   CheckSquare,
-  HelpCircle
+  HelpCircle,
+  Clock
 } from 'lucide-react';
 import {
   XAxis,
@@ -70,8 +71,9 @@ import jsPDF from 'jspdf';
 import { AI_CONFIG, generateAnalysisPrompt, cleanAiResponseText } from './ai-config';
 import { API_CONFIG, getDefaultDateRange, ProjectOption } from './api-config';
 import { fetchAllPlatformsData, transformApiDataToRawData, fetchProjectList, extractUniqueAccounts, fetchUserConfig, saveUserConfig } from './api-service';
-import LoginPage from './LoginPage'; // New: Import LoginPage
-import { getUserSession, saveUserSession, clearUserSession, filterProjectsByKeywords, UserInfo, fetchSystemConfig, saveSystemConfig, getSystemConfig } from './auth-service'; // New: Import auth services
+import LoginPage from './LoginPage';
+import ScheduledReportsPanel from './ScheduledReportsPanel';
+import { getUserSession, saveUserSession, clearUserSession, filterProjectsByKeywords, UserInfo, fetchSystemConfig, saveSystemConfig, getSystemConfig } from './auth-service';
 
 // --- Types ---
 
@@ -642,7 +644,8 @@ const App = () => {
   };
 
   // --- State for App ---
-  const [step, setStep] = useState<'upload' | 'mapping' | 'dashboard' | 'dataSourceConfig'>('upload'); // Added dataSourceConfig step
+  const [projectMainTab, setProjectMainTab] = useState<'analysis' | 'scheduled'>('analysis');
+  const [step, setStep] = useState<'upload' | 'mapping' | 'dashboard' | 'dataSourceConfig'>('upload');
   const [mappingTab, setMappingTab] = useState<'metrics' | 'dimensions' | 'quality'>('metrics');
   const [rawData, setRawData] = useState<RawDataRow[]>([]);
   const [headersBySource, setHeadersBySource] = useState<{
@@ -3764,6 +3767,28 @@ const App = () => {
                   </div>
                 </div>
 
+                {/* 顶层 Tab：数据分析 / 定时任务 */}
+                <div className="flex items-center gap-1 bg-slate-900/50 p-1 rounded-xl border border-slate-800">
+                  {[
+                    { id: 'analysis' as const, label: '数据分析', icon: BarChart3 },
+                    { id: 'scheduled' as const, label: '定时任务', icon: Clock },
+                  ].map(({ id, label, icon: Icon }) => (
+                    <button
+                      key={id}
+                      onClick={() => setProjectMainTab(id)}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${projectMainTab === id ? 'bg-slate-800 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                    >
+                      <Icon className="w-4 h-4" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 时间范围选择：仅在数据分析 Tab 下显示 */}
+              {projectMainTab === 'analysis' && (
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mt-3">
+                <div />
                 <div className="flex flex-wrap items-center gap-3 bg-slate-900/50 p-1.5 rounded-xl border border-slate-800">
                   {/* 报告时间范围：仅在首次获取数据的时间范围内可选 */}
                   {(() => {
@@ -3835,8 +3860,9 @@ const App = () => {
                   </button>
                 </div>
               </div>
-              {/* Tab 栏：仅在 dashboard 步骤显示 */}
-              {step === 'dashboard' && (
+              )}
+              {/* Tab 栏：仅在 数据分析 Tab + dashboard 步骤显示 */}
+              {projectMainTab === 'analysis' && step === 'dashboard' && (
                 <div className="flex items-center gap-1.5 mt-4 pt-4 border-t border-slate-800">
                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mr-2">模块</span>
                   {[
@@ -3866,7 +3892,8 @@ const App = () => {
               )}
             </div>
 
-            {/* --- 报告主体：按 Tab 切换模块 --- */}
+            {/* --- 报告主体 --- */}
+            {projectMainTab === 'analysis' && (
             <div className="space-y-6">
 
               {/* 1. Account Selection (if multiple accounts) */}
@@ -4721,6 +4748,16 @@ const App = () => {
               {step === 'dashboard' && renderDashboardContent()}
 
             </div>
+            )}
+
+            {/* --- 定时任务面板 --- */}
+            {projectMainTab === 'scheduled' && currentUser && (
+              <ScheduledReportsPanel
+                currentUser={currentUser}
+                selectedProject={selectedProject}
+                pivotPresets={pivotPresets.map(p => ({ id: p.id, name: p.name }))}
+              />
+            )}
           </div>
         )}
       </main>

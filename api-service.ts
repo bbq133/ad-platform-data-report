@@ -293,10 +293,12 @@ export function extractUniqueAccounts(data: ApiDataRow[]): { id: string; name: s
 /**
  * 获取用户配置 (Metrics Mapping 或 Dimension Configs)
  */
+export type UserConfigType = 'metrics' | 'dimensions' | 'formulas' | 'pivotPresets' | 'bi' | 'scheduledReports';
+
 export async function fetchUserConfig(
     username: string,
     projectId: string | number,
-    type: 'metrics' | 'dimensions' | 'formulas' | 'pivotPresets' | 'bi'
+    type: UserConfigType
 ): Promise<any> {
     const url = `${GOOGLE_SHEETS_CONFIG.GAS_API_URL}?action=getConfig&user=${encodeURIComponent(username)}&projectId=${projectId}&type=${type}`;
     try {
@@ -318,7 +320,7 @@ export async function fetchUserConfig(
 export async function saveUserConfig(
     username: string,
     projectId: string | number,
-    type: 'metrics' | 'dimensions' | 'formulas' | 'pivotPresets' | 'bi',
+    type: UserConfigType,
     data: any
 ): Promise<boolean> {
     const url = GOOGLE_SHEETS_CONFIG.GAS_API_URL;
