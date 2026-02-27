@@ -238,9 +238,17 @@ const DEFAULT_BI_CARD_ORDER: BiCardKey[] = BUILTIN_BI_CARD_OPTIONS.map(o => o.id
 const GOOGLE_TYPES: GoogleType[] = ['SEARCH', 'DEMAND_GEN', 'PERFORMANCE_MAX', 'VIDEO', 'SHOPPING'];
 
 /** Segment 类型：API 返回的数据层级 */
-type SegmentType = 'ad_date' | 'age_date' | 'gender_adset_date' | 'country_campaign_date' | 'asset_group_date' | 'keyword_date' | 'search_term_date';
+type SegmentType =
+  | 'ad_date'
+  | 'age_date'
+  | 'gender_adset_date'
+  | 'country_campaign_date'
+  | 'asset_group_date'
+  | 'keyword_date'
+  | 'search_term_date'
+  | 'age_gender_date';
 /** 透视表 segment 选择模式 */
-type PivotSegmentMode = 'default' | 'age' | 'gender' | 'country' | 'keyword' | 'search_term';
+type PivotSegmentMode = 'default' | 'age' | 'gender' | 'country' | 'keyword' | 'search_term' | 'age_gender';
 
 interface SegmentOption {
   key: SegmentType;
@@ -256,6 +264,7 @@ const getSegmentOptions = (platform: 'facebook' | 'google', googleType?: GoogleT
       { key: 'age_date', label: 'Age（年龄）' },
       { key: 'gender_adset_date', label: 'Gender（性别）' },
       { key: 'country_campaign_date', label: 'Country（国家）' },
+      { key: 'age_gender_date', label: 'Age + Gender（年龄+性别，仅 Meta）' },
     ];
   }
   if (googleType === 'PERFORMANCE_MAX') {
@@ -319,10 +328,12 @@ const PIVOT_SEGMENT_MODE_MAP: Record<Exclude<PivotSegmentMode, 'default'>, Segme
   country: 'country_campaign_date',
   keyword: 'keyword_date',
   search_term: 'search_term_date',
+  age_gender: 'age_gender_date',
 };
 
 const PIVOT_SEGMENT_MODE_OPTIONS: Array<{ key: PivotSegmentMode; label: string }> = [
   { key: 'default', label: '默认数据源' },
+  { key: 'age_gender', label: 'Age + Gender（年龄+性别，仅 Meta）' },
   { key: 'age', label: 'Age（年龄）' },
   { key: 'gender', label: 'Gender（性别）' },
   { key: 'country', label: 'Country（国家，仅 Meta）' },
@@ -344,6 +355,7 @@ const SEGMENT_ALLOWED_PLATFORMS: Partial<Record<PivotSegmentMode, PivotPlatformS
   country: ['meta'],
   keyword: ['google_search'],
   search_term: ['google_search'],
+  age_gender: ['meta'],
 };
 const DEFAULT_PIVOT_PLATFORM_SCOPES: PivotPlatformScope[] = PIVOT_PLATFORM_OPTIONS.map(o => o.key);
 
@@ -1809,6 +1821,10 @@ const App = () => {
       const targetSeg = PIVOT_SEGMENT_MODE_MAP[pivotSegmentMode];
       // Country segment 仅 Meta 有
       if (pivotSegmentMode === 'country' && row._platform !== 'facebook') {
+        return isDefaultSegmentRow(row);
+      }
+      // Age + Gender segment 仅 Meta 有
+      if (pivotSegmentMode === 'age_gender' && row._platform !== 'facebook') {
         return isDefaultSegmentRow(row);
       }
       // Keyword / Search Term segment 仅 Google Search 有
@@ -3314,6 +3330,7 @@ const App = () => {
                       {pivotSegmentMode === 'country' && '查看国家维度拆分数据（仅 Meta 有此层级，Google 回退默认）'}
                       {pivotSegmentMode === 'keyword' && '查看关键词维度拆分数据（仅 Google Search 有此层级，其他回退默认）'}
                       {pivotSegmentMode === 'search_term' && '查看搜索词维度拆分数据（仅 Google Search 有此层级，其他回退默认）'}
+                      {pivotSegmentMode === 'age_gender' && '同时查看年龄+性别维度拆分数据（仅 Meta 有此层级，Google 回退默认）'}
                     </div>
                   </div>
 
