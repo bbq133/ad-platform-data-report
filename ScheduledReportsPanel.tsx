@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Clock,
   Plus,
@@ -111,6 +111,11 @@ function formatDateTime(iso: string) {
 }
 
 const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, pivotPresets }) => {
+  const pivotPresetsRef = useRef(pivotPresets);
+  useEffect(() => {
+    pivotPresetsRef.current = pivotPresets;
+  }, [pivotPresets]);
+
   const [tasks, setTasks] = useState<ScheduledReportTask[]>([]);
   const [logs, setLogs] = useState<ScheduledReportLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -139,8 +144,20 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
       const data = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'scheduledReports');
       if (data) {
         const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-        setTasks(parsed.tasks || []);
+        const rawTasks: ScheduledReportTask[] = parsed.tasks || [];
+        const validPresetIds = new Set((pivotPresetsRef.current || []).map(p => p.id));
+        // 移除已删除报告的引用，避免定时任务/邮件/在线表格不一致
+        const updatedTasks = rawTasks.map(t => ({
+          ...t,
+          pivotPresetIds: t.pivotPresetIds.filter(pid => validPresetIds.has(pid)),
+        }));
+        const hasStaleRefs = updatedTasks.some((t, i) => t.pivotPresetIds.length !== rawTasks[i].pivotPresetIds.length);
+        setTasks(updatedTasks);
         setLogs(parsed.logs || []);
+        if (hasStaleRefs) {
+          const payload = { tasks: updatedTasks, logs: parsed.logs || [] };
+          await saveUserConfig(currentUser.username, selectedProject.projectId, 'scheduledReports', payload);
+        }
       } else {
         setTasks([]);
         setLogs([]);
@@ -207,7 +224,9 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
     setFormFrequency(task.frequency);
     setFormTimeOfDay(task.timeOfDay);
     setFormWeekDay(task.weekDay ?? 1);
-    setFormPresetIds([...task.pivotPresetIds]);
+    // 只预填仍存在的报告，避免已删除报告出现在表单中
+    const validIds = new Set(pivotPresets.map(p => p.id));
+    setFormPresetIds(task.pivotPresetIds.filter(pid => validIds.has(pid)));
     setFormEmails(task.emails.join(', '));
     setFormActive(task.active);
     setFormDateRangePreset(task.dateRangePreset ?? 'last3');
@@ -377,14 +396,21 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
                     </span>
                   </div>
 
-                  {/* Preset tags */}
-                  <div className="flex flex-wrap gap-1.5 mt-3">
-                    {task.pivotPresetIds.map(pid => (
-                      <span key={pid} className="px-2 py-0.5 bg-slate-800 text-slate-300 text-xs rounded-lg border border-slate-700">
-                        {getPresetName(pid)}
-                      </span>
-                    ))}
-                  </div>
+                  {/* Preset tags：仅展示仍存在的报告，已删除的不会显示 */}
+                  {task.pivotPresetIds.length === 0 ? (
+                    <p className="text-amber-500/90 text-xs mt-3 flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      该任务暂无有效报告（可能已删除），请编辑添加报告或删除此任务
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5 mt-3">
+                      {task.pivotPresetIds.map(pid => (
+                        <span key={pid} className="px-2 py-0.5 bg-slate-800 text-slate-300 text-xs rounded-lg border border-slate-700">
+                          {getPresetName(pid)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
 
                   {task.lastRunAt && (
                     <p className="text-xs text-slate-500 mt-2">上次运行: {formatDateTime(task.lastRunAt)}</p>
