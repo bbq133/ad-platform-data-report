@@ -74,6 +74,7 @@ import { fetchAllPlatformsData, transformApiDataToRawData, fetchProjectList, ext
 import LoginPage from './LoginPage';
 import ScheduledReportsPanel from './ScheduledReportsPanel';
 import { getUserSession, saveUserSession, clearUserSession, filterProjectsByKeywords, UserInfo, fetchSystemConfig, saveSystemConfig, getSystemConfig } from './auth-service';
+import { initTracking, trackLogin, trackProjectSelect, trackFetchData, trackExportData, trackSaveConfig, trackSavePivotPreset, trackAiAnalysis } from './tracking-service';
 
 // --- Types ---
 
@@ -590,19 +591,24 @@ const App = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserInfo | null>(null);
 
-  // Check for existing session on mount
   useEffect(() => {
     const user = getUserSession();
     if (user) {
       setCurrentUser(user);
       setIsLoggedIn(true);
 
-      // Ensure SystemConfig is present, if not, fetch it background
       const cachedConfig = getSystemConfig();
+      if (cachedConfig?.['FEISHU_WEBHOOK_URL']) {
+        initTracking(cachedConfig['FEISHU_WEBHOOK_URL'], cachedConfig['FEISHU_WEBHOOK_TOKEN'] || '');
+      }
+
       if (!cachedConfig || Object.keys(cachedConfig).length === 0) {
         fetchSystemConfig().then(config => {
           if (config && Object.keys(config).length > 0) {
             saveSystemConfig(config);
+            if (config['FEISHU_WEBHOOK_URL']) {
+              initTracking(config['FEISHU_WEBHOOK_URL'], config['FEISHU_WEBHOOK_TOKEN'] || '');
+            }
           }
         }).catch(err => console.error("Background config fetch failed", err));
       }
@@ -610,15 +616,19 @@ const App = () => {
   }, []);
 
   const handleLogin = async (userInfo: UserInfo) => {
-    saveUserSession(userInfo); // Save session on successful login
+    saveUserSession(userInfo);
     setCurrentUser(userInfo);
     setIsLoggedIn(true);
 
-    // Fetch System Config (Dynamic API Keys)
     const systemConfig = await fetchSystemConfig();
     if (systemConfig) {
       saveSystemConfig(systemConfig);
+      if (systemConfig['FEISHU_WEBHOOK_URL']) {
+        initTracking(systemConfig['FEISHU_WEBHOOK_URL'], systemConfig['FEISHU_WEBHOOK_TOKEN'] || '');
+      }
     }
+
+    trackLogin(userInfo.username);
   };
 
   const handleLogout = () => {
@@ -1300,6 +1310,7 @@ const App = () => {
   // --- Save Configuration Handler ---
   const handleSaveConfig = async () => {
     if (!currentUser || !selectedProject?.projectId) return;
+    trackSaveConfig(currentUser.username);
 
     setIsLoadingData(true);
     try {
@@ -2262,7 +2273,8 @@ const App = () => {
   };
 
   const handleProjectSelect = async (project: ProjectOption) => {
-    setSelectedProject(project); // Store full project object
+    if (currentUser) trackProjectSelect(currentUser.username, project.projectName);
+    setSelectedProject(project);
     setIsProjectModalOpen(false);
     setProjectSearchTerm('');
     setApiError('');
@@ -2330,6 +2342,8 @@ const App = () => {
         return;
       }
 
+      if (currentUser && selectedProject) trackFetchData(currentUser.username, selectedProject.projectName);
+
       const transformed = transformApiDataToRawData(apiData);
       const ageCount = transformed.filter(row => String(row['Age'] || '').trim()).length;
       const genderCount = transformed.filter(row => String(row['Gender'] || '').trim()).length;
@@ -2394,6 +2408,7 @@ const App = () => {
 
   const handleAiAnalysis = async () => {
     if (tableData.length === 0) return;
+    if (currentUser) trackAiAnalysis(currentUser.username);
     setIsAnalyzing(true);
     setAiAnalysis('');
 
@@ -2554,6 +2569,7 @@ const App = () => {
   const handleSavePivotPreset = () => {
     const name = pivotPresetNameInput.trim();
     if (!name) return;
+    if (currentUser) trackSavePivotPreset(currentUser.username, name);
     const preset: PivotPreset = {
       id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `preset_${Date.now()}`,
       name,
@@ -2683,6 +2699,8 @@ const App = () => {
 
   const exportPivotData = (type: 'csv' | 'xlsx') => {
     if (!pivotResult) return;
+    if (currentUser) trackExportData(currentUser.username, `透视表${type.toUpperCase()}`);
+
     const rowHeaders = pivotResult.rowDims.length ? pivotResult.rowDims : ['维度'];
     const colKeys = pivotResult.colKeys;
     const valueKeys = pivotResult.valueKeys;
@@ -5136,6 +5154,7 @@ const App = () => {
 
         // 导出 Excel
         const handleExportRawXlsx = () => {
+          if (currentUser) trackExportData(currentUser.username, 'Excel源数据');
           const header = allCols;
           const rows = searched.map((r: any) => allCols.map(c => r[c] ?? ''));
           const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);

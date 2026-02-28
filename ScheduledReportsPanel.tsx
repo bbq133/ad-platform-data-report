@@ -22,6 +22,7 @@ import {
 import { fetchUserConfig, saveUserConfig } from './api-service';
 import type { ProjectOption } from './api-config';
 import type { UserInfo } from './auth-service';
+import { trackScheduledTaskCreate, trackScheduledTaskEdit, trackScheduledTaskDelete, trackScheduledTaskToggle, trackScheduledTaskSend } from './tracking-service';
 
 // --- Types ---
 
@@ -116,6 +117,8 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
     pivotPresetsRef.current = pivotPresets;
   }, [pivotPresets]);
 
+  const prevLogCountRef = useRef<number>(0);
+
   const [tasks, setTasks] = useState<ScheduledReportTask[]>([]);
   const [logs, setLogs] = useState<ScheduledReportLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -153,7 +156,17 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
         }));
         const hasStaleRefs = updatedTasks.some((t, i) => t.pivotPresetIds.length !== rawTasks[i].pivotPresetIds.length);
         setTasks(updatedTasks);
-        setLogs(parsed.logs || []);
+        const newLogs: ScheduledReportLog[] = parsed.logs || [];
+        setLogs(newLogs);
+
+        if (prevLogCountRef.current > 0 && newLogs.length > prevLogCountRef.current) {
+          const addedLogs = newLogs.slice(prevLogCountRef.current);
+          addedLogs.forEach(log => {
+            trackScheduledTaskSend(currentUser.username, log.taskName, log.status);
+          });
+        }
+        prevLogCountRef.current = newLogs.length;
+
         if (hasStaleRefs) {
           const payload = { tasks: updatedTasks, logs: parsed.logs || [] };
           await saveUserConfig(currentUser.username, selectedProject.projectId, 'scheduledReports', payload);
@@ -260,8 +273,10 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
 
     let updatedTasks: ScheduledReportTask[];
     if (editingTask) {
+      trackScheduledTaskEdit(currentUser.username, taskData.name);
       updatedTasks = tasks.map(t => t.id === editingTask.id ? taskData : t);
     } else {
+      trackScheduledTaskCreate(currentUser.username, taskData.name);
       updatedTasks = [...tasks, taskData];
     }
     saveTasks(updatedTasks);
@@ -270,11 +285,15 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
   };
 
   const handleDeleteTask = (id: string) => {
+    const task = tasks.find(t => t.id === id);
+    if (task) trackScheduledTaskDelete(currentUser.username, task.name);
     const updatedTasks = tasks.filter(t => t.id !== id);
     saveTasks(updatedTasks);
   };
 
   const handleToggleActive = (id: string) => {
+    const task = tasks.find(t => t.id === id);
+    if (task) trackScheduledTaskToggle(currentUser.username, task.name, task.active);
     const updatedTasks = tasks.map(t => t.id === id ? { ...t, active: !t.active } : t);
     saveTasks(updatedTasks);
   };
