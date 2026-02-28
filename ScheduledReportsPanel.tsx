@@ -469,7 +469,7 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
                             <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${formPresetIds.includes(preset.id) ? 'bg-indigo-600 border-indigo-500' : 'border-slate-600'}`}>
                               {formPresetIds.includes(preset.id) && <Check className="w-3 h-3 text-white" />}
                             </div>
-                            <span className="truncate font-medium">{preset.name}</span>
+                            <span className="truncate font-medium tracking-normal">{preset.name}</span>
                           </button>
                         ))}
                       </div>

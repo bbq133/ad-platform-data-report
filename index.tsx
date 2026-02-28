@@ -3115,7 +3115,7 @@ const App = () => {
                             tabIndex={0}
                             onKeyDown={(e) => { if (e.key === 'Enter') handleApplyPivotPreset(p); }}
                           >
-                            <span className="flex-1 text-left text-xs font-bold text-slate-200 truncate min-w-0">
+                            <span className="flex-1 text-left text-xs font-bold text-slate-200 truncate min-w-0 tracking-normal">
                               {p.name}
                             </span>
                             <button onClick={(e) => handleUpdatePivotPreset(p.id, e)} className="p-1 text-slate-500 hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="用当前配置覆盖">
@@ -3773,7 +3773,7 @@ const App = () => {
                       {activeReportTab === 'pivot' && (
                         <p className="text-slate-500 text-[11px] mt-1.5 flex items-center gap-1.5">
                           <span>当前报告：</span>
-                          <span className={activePivotPresetId ? 'text-indigo-400 font-semibold' : 'text-slate-500'}>
+                          <span className={`tracking-normal ${activePivotPresetId ? 'text-indigo-400 font-semibold' : 'text-slate-500'}`}>
                             {activePivotPresetId
                               ? (pivotPresets.find(p => p.id === activePivotPresetId)?.name ?? '未知')
                               : '未选择'}
@@ -5011,7 +5011,7 @@ const App = () => {
               <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block tracking-widest">报告名称</label>
               <input
                 type="text"
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 font-black outline-none focus:border-indigo-500 text-base text-white"
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 font-black outline-none focus:border-indigo-500 text-base text-white tracking-normal"
                 placeholder="例如：按国家+Campaign 成本透视"
                 value={pivotPresetNameInput}
                 onChange={e => setPivotPresetNameInput(e.target.value)}
