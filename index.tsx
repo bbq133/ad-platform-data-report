@@ -1013,6 +1013,9 @@ const App = () => {
   const [activePivotPresetId, setActivePivotPresetId] = useState<string | null>(null);
   /** 更新当前报告设置完成后的弱提示 */
   const [pivotUpdateHintVisible, setPivotUpdateHintVisible] = useState(false);
+  /** 修改报告名称：正在编辑的报告 id，非空时显示重命名弹窗 */
+  const [renamePresetId, setRenamePresetId] = useState<string | null>(null);
+  const [renamePresetNameInput, setRenamePresetNameInput] = useState('');
 
   // 切换平台/Google 类型时自动重置 segment 到默认值
   useEffect(() => {
@@ -2682,6 +2685,19 @@ const App = () => {
     });
   };
 
+  /** 修改已保存报告的名称 */
+  const handleRenamePivotPreset = () => {
+    if (!renamePresetId || !renamePresetNameInput.trim()) return;
+    const newName = renamePresetNameInput.trim();
+    setPivotPresets(prev => {
+      const next = prev.map(p => (p.id === renamePresetId ? { ...p, name: newName } : p));
+      persistPivotPresets(next);
+      return next;
+    });
+    setRenamePresetId(null);
+    setRenamePresetNameInput('');
+  };
+
   const handleAddDimension = () => {
     if (!newDimensionName.trim()) return;
     if (allDimensions.includes(newDimensionName.trim())) return;
@@ -3136,8 +3152,11 @@ const App = () => {
                             <span className="flex-1 text-left text-xs font-bold text-slate-200 truncate min-w-0 tracking-normal">
                               {p.name}
                             </span>
-                            <button onClick={(e) => handleUpdatePivotPreset(p.id, e)} className="p-1 text-slate-500 hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="用当前配置覆盖">
+                            <button onClick={(e) => { e.stopPropagation(); setIsPivotPresetDropdownOpen(false); setRenamePresetId(p.id); setRenamePresetNameInput(p.name); }} className="p-1 text-slate-500 hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="修改报告名称">
                               <Edit3 size={12} />
+                            </button>
+                            <button onClick={(e) => handleUpdatePivotPreset(p.id, e)} className="p-1 text-slate-500 hover:text-amber-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="用当前配置覆盖">
+                              <RefreshCcw size={12} />
                             </button>
                             <button onClick={(e) => handleRemovePivotPreset(p.id, e)} className="p-1 text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="删除">
                               <Trash2 size={12} />
@@ -3802,11 +3821,11 @@ const App = () => {
                   </div>
                 </div>
 
-                {/* 顶层 Tab：数据分析 / 定时任务 */}
+                {/* 顶层 Tab：数据分析 / 报告定时任务 */}
                 <div className="flex items-center gap-1 bg-slate-900/50 p-1 rounded-xl border border-slate-800">
                   {[
                     { id: 'analysis' as const, label: '数据分析', icon: BarChart3 },
-                    { id: 'scheduled' as const, label: '定时任务', icon: Clock },
+                    { id: 'scheduled' as const, label: '报告定时任务', icon: Clock },
                   ].map(({ id, label, icon: Icon }) => (
                     <button
                       key={id}
@@ -4785,7 +4804,7 @@ const App = () => {
             </div>
             )}
 
-            {/* --- 定时任务面板 --- */}
+            {/* --- 报告定时任务面板 --- */}
             {projectMainTab === 'scheduled' && currentUser && (
               <ScheduledReportsPanel
                 currentUser={currentUser}
@@ -5012,6 +5031,33 @@ const App = () => {
               >
                 知道了
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 修改报告名称弹窗 */}
+      {renamePresetId != null && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 w-full max-w-md rounded-[32px] shadow-2xl p-8 animate-in fade-in zoom-in duration-300 border border-slate-800">
+            <div className="flex items-center justify-between mb-6">
+              <h4 className="text-xl font-black text-white">修改报告名称</h4>
+              <button onClick={() => { setRenamePresetId(null); setRenamePresetNameInput(''); }} className="p-2 hover:bg-slate-800 rounded-full transition text-slate-400"><X size={20} /></button>
+            </div>
+            <div className="mb-6">
+              <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block tracking-widest">报告名称</label>
+              <input
+                type="text"
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 font-black outline-none focus:border-indigo-500 text-base text-white tracking-normal"
+                placeholder="输入新名称"
+                value={renamePresetNameInput}
+                onChange={e => setRenamePresetNameInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleRenamePivotPreset(); }}
+              />
+            </div>
+            <div className="flex gap-4">
+              <button onClick={() => { setRenamePresetId(null); setRenamePresetNameInput(''); }} className="flex-1 py-3 rounded-xl font-black text-slate-400 text-xs hover:text-slate-200 transition">取消</button>
+              <button onClick={handleRenamePivotPreset} disabled={!renamePresetNameInput.trim()} className="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-black text-sm hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed">确定</button>
             </div>
           </div>
         </div>

@@ -310,7 +310,7 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
       {/* Sub-tab: Tasks vs History */}
       <div className="flex items-center gap-2 mb-2">
         {[
-          { id: 'tasks' as const, label: '定时任务', icon: Clock },
+          { id: 'tasks' as const, label: '报告定时任务', icon: Clock },
           { id: 'history' as const, label: '发送记录', icon: History },
         ].map(({ id, label, icon: Icon }) => (
           <button
@@ -360,7 +360,7 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
               className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm rounded-xl transition-all shadow-lg shadow-indigo-900/30"
             >
               <Plus className="w-4 h-4" />
-              新建定时任务
+              新建报告定时任务
             </button>
           </div>
 
@@ -368,14 +368,14 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
           {tasks.length === 0 && !isFormOpen && (
             <div className="bg-slate-900/50 rounded-3xl border border-slate-800 p-16 text-center">
               <Clock className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-              <p className="text-slate-400 font-bold text-lg mb-2">暂无定时任务</p>
-              <p className="text-slate-500 text-sm mb-6">创建定时任务后，系统将按设定时间自动生成报告并发送至指定邮箱</p>
+              <p className="text-slate-400 font-bold text-lg mb-2">暂无报告定时任务</p>
+              <p className="text-slate-500 text-sm mb-6">创建报告定时任务后，系统将按设定时间自动生成报告并发送至指定邮箱</p>
               <button
                 onClick={openCreateForm}
                 className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm rounded-xl transition-all"
               >
                 <Plus className="w-4 h-4" />
-                创建第一个定时任务
+                创建第一个报告定时任务
               </button>
             </div>
           )}
@@ -473,7 +473,7 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
               >
                 <div className="flex items-center justify-between mb-6">
                   <h3 className="text-xl font-black text-white">
-                    {editingTask ? '编辑定时任务' : '新建定时任务'}
+                    {editingTask ? '编辑报告定时任务' : '新建报告定时任务'}
                   </h3>
                   <button onClick={() => { setIsFormOpen(false); resetForm(); }} className="p-2 hover:bg-slate-800 rounded-xl transition-colors text-slate-400 hover:text-white">
                     <X className="w-5 h-5" />
@@ -666,7 +666,7 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
             <div className="bg-slate-900/50 rounded-3xl border border-slate-800 p-16 text-center">
               <History className="w-12 h-12 text-slate-600 mx-auto mb-4" />
               <p className="text-slate-400 font-bold text-lg mb-2">暂无发送记录</p>
-              <p className="text-slate-500 text-sm">定时任务执行后，发送记录将在这里展示</p>
+              <p className="text-slate-500 text-sm">报告定时任务执行后，发送记录将在这里展示</p>
             </div>
           ) : (
             <div className="bg-slate-900/50 rounded-2xl border border-slate-800 overflow-hidden">
