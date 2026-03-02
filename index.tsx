@@ -51,7 +51,8 @@ import {
   AlertTriangle,
   CheckSquare,
   HelpCircle,
-  Clock
+  Clock,
+  Bell
 } from 'lucide-react';
 import {
   XAxis,
@@ -73,6 +74,7 @@ import { API_CONFIG, getDefaultDateRange, ProjectOption } from './api-config';
 import { fetchAllPlatformsData, transformApiDataToRawData, fetchProjectList, extractUniqueAccounts, fetchUserConfig, saveUserConfig } from './api-service';
 import LoginPage from './LoginPage';
 import ScheduledReportsPanel from './ScheduledReportsPanel';
+import AlertRulesPanel from './AlertRulesPanel';
 import { getUserSession, saveUserSession, clearUserSession, filterProjectsByKeywords, UserInfo, fetchSystemConfig, saveSystemConfig, getSystemConfig } from './auth-service';
 import { initTracking, trackLogin, trackProjectSelect, trackFetchData, trackExportData, trackSaveConfig, trackSavePivotPreset, trackAiAnalysis } from './tracking-service';
 
@@ -666,7 +668,7 @@ const App = () => {
   };
 
   // --- State for App ---
-  const [projectMainTab, setProjectMainTab] = useState<'analysis' | 'scheduled'>('analysis');
+  const [projectMainTab, setProjectMainTab] = useState<'analysis' | 'scheduled' | 'alerts'>('analysis');
   const [step, setStep] = useState<'upload' | 'mapping' | 'dashboard' | 'dataSourceConfig'>('upload');
   const [mappingTab, setMappingTab] = useState<'metrics' | 'dimensions' | 'quality'>('metrics');
   const [rawData, setRawData] = useState<RawDataRow[]>([]);
@@ -3826,6 +3828,7 @@ const App = () => {
                   {[
                     { id: 'analysis' as const, label: '数据分析', icon: BarChart3 },
                     { id: 'scheduled' as const, label: '报告定时任务', icon: Clock },
+                    { id: 'alerts' as const, label: '广告预警监控', icon: Bell },
                   ].map(({ id, label, icon: Icon }) => (
                     <button
                       key={id}
@@ -4810,6 +4813,14 @@ const App = () => {
                 currentUser={currentUser}
                 selectedProject={selectedProject}
                 pivotPresets={pivotPresets.map(p => ({ id: p.id, name: p.name }))}
+              />
+            )}
+
+            {/* --- 广告预警监控面板 --- */}
+            {projectMainTab === 'alerts' && currentUser && (
+              <AlertRulesPanel
+                currentUser={currentUser}
+                selectedProject={selectedProject}
               />
             )}
           </div>

@@ -293,7 +293,7 @@ export function extractUniqueAccounts(data: ApiDataRow[]): { id: string; name: s
 /**
  * 获取用户配置 (Metrics Mapping 或 Dimension Configs)
  */
-export type UserConfigType = 'metrics' | 'dimensions' | 'formulas' | 'pivotPresets' | 'bi' | 'scheduledReports';
+export type UserConfigType = 'metrics' | 'dimensions' | 'formulas' | 'pivotPresets' | 'bi' | 'scheduledReports' | 'alertRules';
 
 export async function fetchUserConfig(
     username: string,
