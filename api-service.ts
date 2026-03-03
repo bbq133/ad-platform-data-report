@@ -383,6 +383,29 @@ export async function testSendScheduledReport(
     };
 
     try {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Debug-Session-Id': '6554c0',
+            },
+            body: JSON.stringify({
+                sessionId: '6554c0',
+                runId: 'initial',
+                hypothesisId: 'H2',
+                location: 'api-service.ts:testSendScheduledReport',
+                message: 'test send request',
+                data: {
+                    projectId,
+                    hasTaskId: !!task.id,
+                    emailsCount: task.emails?.length ?? 0,
+                },
+                timestamp: Date.now(),
+            }),
+        }).catch(() => {});
+        // #endregion
+
         const response = await fetch(url, {
             method: 'POST',
             // 与 saveUserConfig 保持一致，避免复杂 CORS 预检
@@ -392,12 +415,65 @@ export async function testSendScheduledReport(
             body: JSON.stringify(payload)
         });
 
-        const result = await response.json();
+        let result: any = null;
+        try {
+            result = await response.json();
+        } catch {
+            result = null;
+        }
 
-        if (result.status !== 'success') {
-            throw new Error(result.message || '测试发送失败');
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Debug-Session-Id': '6554c0',
+            },
+            body: JSON.stringify({
+                sessionId: '6554c0',
+                runId: 'initial',
+                hypothesisId: 'H3',
+                location: 'api-service.ts:testSendScheduledReport',
+                message: 'test send response',
+                data: {
+                    ok: response.ok,
+                    status: response.status,
+                    resultStatus: result && typeof result === 'object' ? (result.status ?? null) : null,
+                    resultMessage: result && typeof result === 'object' ? (result.message ?? null) : null,
+                },
+                timestamp: Date.now(),
+            }),
+        }).catch(() => {});
+        // #endregion
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        if (!result || result.status !== 'success') {
+            throw new Error((result && result.message) || '测试发送失败');
         }
     } catch (e) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Debug-Session-Id': '6554c0',
+            },
+            body: JSON.stringify({
+                sessionId: '6554c0',
+                runId: 'initial',
+                hypothesisId: 'H4',
+                location: 'api-service.ts:testSendScheduledReport',
+                message: 'test send error',
+                data: {
+                    errorMessage: e instanceof Error ? e.message : String(e),
+                },
+                timestamp: Date.now(),
+            }),
+        }).catch(() => {});
+        // #endregion
+
         console.error('Failed to test send scheduled report:', e);
         // 抛出错误给调用方，在 UI 中展示
         throw e;

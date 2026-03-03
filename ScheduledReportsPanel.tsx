@@ -65,6 +65,12 @@ interface Props {
   currentUser: UserInfo;
   selectedProject: ProjectOption;
   pivotPresets: PivotPresetInfo[];
+  /** 由父组件管理，切换 Tab 不丢失 */
+  tasks: ScheduledReportTask[];
+  setTasks: React.Dispatch<React.SetStateAction<ScheduledReportTask[]>>;
+  logs: ScheduledReportLog[];
+  setLogs: React.Dispatch<React.SetStateAction<ScheduledReportLog[]>>;
+  isLoadingScheduledReports?: boolean;
 }
 
 const WEEK_DAYS = [
@@ -111,7 +117,16 @@ function formatDateTime(iso: string) {
   }
 }
 
-const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, pivotPresets }) => {
+const ScheduledReportsPanel: React.FC<Props> = ({
+  currentUser,
+  selectedProject,
+  pivotPresets,
+  tasks,
+  setTasks,
+  logs,
+  setLogs,
+  isLoadingScheduledReports = false,
+}) => {
   const pivotPresetsRef = useRef(pivotPresets);
   useEffect(() => {
     pivotPresetsRef.current = pivotPresets;
@@ -119,9 +134,6 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
 
   const prevLogCountRef = useRef<number>(0);
 
-  const [tasks, setTasks] = useState<ScheduledReportTask[]>([]);
-  const [logs, setLogs] = useState<ScheduledReportLog[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [editingTask, setEditingTask] = useState<ScheduledReportTask | null>(null);
@@ -142,53 +154,24 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
   const [formCustomDateStart, setFormCustomDateStart] = useState('');
   const [formCustomDateEnd, setFormCustomDateEnd] = useState('');
 
-  // --- Load tasks ---
-  const loadTasks = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const data = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'scheduledReports');
-      if (data) {
-        const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-        const rawTasks: ScheduledReportTask[] = parsed.tasks || [];
-        const validPresetIds = new Set((pivotPresetsRef.current || []).map(p => p.id));
-        // 移除已删除报告的引用，避免定时任务/邮件/在线表格不一致
-        const updatedTasks = rawTasks.map(t => ({
-          ...t,
-          pivotPresetIds: t.pivotPresetIds.filter(pid => validPresetIds.has(pid)),
-        }));
-        const hasStaleRefs = updatedTasks.some((t, i) => t.pivotPresetIds.length !== rawTasks[i].pivotPresetIds.length);
-        setTasks(updatedTasks);
-        const newLogs: ScheduledReportLog[] = parsed.logs || [];
-        setLogs(newLogs);
-
-        if (prevLogCountRef.current > 0 && newLogs.length > prevLogCountRef.current) {
-          const addedLogs = newLogs.slice(prevLogCountRef.current);
-          addedLogs.forEach(log => {
-            trackScheduledTaskSend(currentUser.username, log.taskName, log.status);
-          });
-        }
-        prevLogCountRef.current = newLogs.length;
-
-        if (hasStaleRefs) {
-          const payload = { tasks: updatedTasks, logs: parsed.logs || [] };
-          await saveUserConfig(currentUser.username, selectedProject.projectId, 'scheduledReports', payload);
-        }
-      } else {
-        setTasks([]);
-        setLogs([]);
-      }
-    } catch (e) {
-      console.error('Failed to load scheduled reports config:', e);
-      setTasks([]);
-      setLogs([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [currentUser.username, selectedProject.projectId]);
+  const isLoading = isLoadingScheduledReports;
+  // 展示用：移除已删除报告的引用
+  const displayTasks = React.useMemo(() => {
+    const validPresetIds = new Set(pivotPresets.map(p => p.id));
+    return tasks.map(t => ({
+      ...t,
+      pivotPresetIds: (t.pivotPresetIds || []).filter(pid => validPresetIds.has(pid)),
+    }));
+  }, [tasks, pivotPresets]);
 
   useEffect(() => {
-    loadTasks();
-  }, [loadTasks]);
+    if (prevLogCountRef.current > 0 && logs.length > prevLogCountRef.current) {
+      logs.slice(prevLogCountRef.current).forEach(log => {
+        trackScheduledTaskSend(currentUser.username, log.taskName, log.status);
+      });
+    }
+    prevLogCountRef.current = logs.length;
+  }, [logs.length, currentUser.username]);
 
   // --- Save tasks ---
   const saveTasks = async (updatedTasks: ScheduledReportTask[], updatedLogs?: ScheduledReportLog[]) => {
@@ -442,10 +425,9 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
             </span>
           )}
           <button
-            onClick={loadTasks}
+            onClick={() => {}}
             disabled={isLoading}
             className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors disabled:opacity-50"
-            title="刷新"
           >
             <RefreshCcw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
@@ -478,7 +460,7 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
           </div>
 
           {/* Task List */}
-          {tasks.length === 0 && !isFormOpen && (
+          {displayTasks.length === 0 && !isFormOpen && (
             <div className="bg-slate-900/50 rounded-3xl border border-slate-800 p-16 text-center">
               <Clock className="w-12 h-12 text-slate-600 mx-auto mb-4" />
               <p className="text-slate-400 font-bold text-lg mb-2">暂无报告定时任务</p>
@@ -493,7 +475,7 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
             </div>
           )}
 
-          {tasks.map(task => (
+          {displayTasks.map(task => (
             <div
               key={task.id}
               className={`bg-slate-900/50 rounded-2xl border p-5 transition-all ${task.active ? 'border-slate-800' : 'border-slate-800/50 opacity-60'}`}

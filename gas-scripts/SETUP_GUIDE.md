@@ -159,6 +159,25 @@ var allowedTypes = ['metrics', 'dimensions', 'formulas', 'pivotPresets', 'bi', '
 
 ---
 
+## 第六步：让「发送测试邮件」真正发邮件
+
+前端的「发送测试邮件」会向同一 GAS Web App 发送 `action: 'testScheduledReport'` 的 POST。若您的 `doPost` 未处理该 action，可能只返回了成功而并未执行发信，导致收不到邮件。
+
+**操作**：在您处理 POST 请求的代码中（与 getConfig/saveConfig 同属一个 Web App 的 doPost），增加对 `testScheduledReport` 的分支：
+
+1. 解析 POST body 为 JSON（例如 `var data = JSON.parse(e.postData.contents);`）。
+2. 若 `data.action === 'testScheduledReport'`，调用本仓库提供的函数并直接返回其返回值：
+   ```javascript
+   if (data.action === 'testScheduledReport') {
+     return handleTestScheduledReport(data);
+   }
+   ```
+3. `handleTestScheduledReport` 已在 `ScheduledReports.gs` 中实现，会执行与定时任务相同的流程：读取 UserConfigs、拉取广告数据、生成表格、用 MailApp 发邮件。返回 `{ status: 'success' }` 或 `{ status: 'error', message: '...' }`。
+
+保存并重新部署 Web App 后，再在前端点击「发送测试邮件」即可收到真实邮件（请同时检查垃圾邮件箱）。
+
+---
+
 ## 架构总结
 
 ```

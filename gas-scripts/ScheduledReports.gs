@@ -183,6 +183,18 @@ function executeTask(task, config, allConfigs) {
     
     var pivotData = typeof pivotConfig.data === 'string' ? JSON.parse(pivotConfig.data) : pivotConfig.data;
     var allPresets = extractAllPresets(pivotData);
+
+    // 1.1 获取用户自定义公式（用于 ROI 等派生指标，保持与前端一致）
+    var formulaConfig = allConfigs.filter(function(c) {
+      return c.user === config.user && c.projectId === config.projectId && c.type === 'formulas';
+    })[0];
+    var formulas = [];
+    if (formulaConfig && formulaConfig.data) {
+      var formulaData = typeof formulaConfig.data === 'string' ? JSON.parse(formulaConfig.data) : formulaConfig.data;
+      if (Array.isArray(formulaData)) {
+        formulas = formulaData;
+      }
+    }
     
     // 按 ID 筛选需要发送的报告
     var selectedPresets = [];
@@ -213,8 +225,8 @@ function executeTask(task, config, allConfigs) {
     // 3. 转换数据
     var transformedData = transformApiData(adData);
     
-    // 4. 创建 / 更新 Google Spreadsheet
-    var reportSpreadsheet = createOrUpdateReportSpreadsheet(task, selectedPresets, transformedData);
+    // 4. 创建 / 更新 Google Spreadsheet（带入 formulas，用于计算 ROI 等派生指标）
+    var reportSpreadsheet = createOrUpdateReportSpreadsheet(task, selectedPresets, transformedData, formulas);
     var sheetUrl = reportSpreadsheet.getUrl();
     logEntry.sheetUrl = sheetUrl;
     
@@ -303,6 +315,39 @@ function fetchAdDataFromApi(projectId, startDate, endDate) {
 // ==================== 数据转换（简化版） ====================
 
 function transformApiData(apiData) {
+  function parseExtra(extra) {
+    if (!extra) return null;
+    if (typeof extra === 'object') return extra;
+    if (typeof extra !== 'string') return null;
+    try {
+      return JSON.parse(extra);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function getAge(row) {
+    var extra = parseExtra(row.extra);
+    return (
+      row.ageRange ||
+      row.age_range ||
+      row.age ||
+      (extra && (extra.ageRange || extra.age_range || extra.age)) ||
+      ''
+    );
+  }
+
+  function getGender(row) {
+    var extra = parseExtra(row.extra);
+    return (
+      row.genderType ||
+      row.gender_type ||
+      row.gender ||
+      (extra && (extra.genderType || extra.gender_type || extra.gender)) ||
+      ''
+    );
+  }
+
   return apiData.map(function(row) {
     var costUsd = parseFloat(row.costUsd) || 0;
     var cost = parseFloat(row.cost) || 0;
@@ -325,8 +370,8 @@ function transformApiData(apiData) {
       'Campaign Type': adType,
       'Country': row.country || '',
       'Device': row.device || '',
-      'Age': row.ageRange || '',
-      'Gender': row.genderType || '',
+      'Age': getAge(row),
+      'Gender': getGender(row),
       'Amount spent (USD)': effectiveCostUsd,
       'Spend': cost,
       'Currency': row.currency || '',
@@ -376,7 +421,7 @@ function extractAllPresets(pivotData) {
   return allPresets;
 }
 
-function createOrUpdateReportSpreadsheet(task, presets, allData) {
+function createOrUpdateReportSpreadsheet(task, presets, allData, formulas) {
   var spreadsheet;
   
   // 尝试打开已有文档
@@ -414,8 +459,8 @@ function createOrUpdateReportSpreadsheet(task, presets, allData) {
     // 根据 preset 的 filters、platformScopes 过滤数据
     var filteredData = applyPresetFilters(allData, preset);
     
-    // 按透视维度分组聚合（与前端透视表一致）
-    var sheetData = buildPivotSheetData(filteredData, preset);
+    // 按透视维度分组聚合（与前端透视表一致），并计算 ROI 等派生指标
+    var sheetData = buildPivotSheetData(filteredData, preset, formulas);
     
     // 写入 Sheet
     writeToSheet(spreadsheet, sheetName, sheetData);
@@ -446,7 +491,8 @@ var SEGMENT_MODE_MAP = {
   'gender': 'gender_adset_date',
   'country': 'country_campaign_date',
   'keyword': 'keyword_date',
-  'search_term': 'search_term_date'
+  'search_term': 'search_term_date',
+  'age_gender': 'age_gender_date'
 };
 
 /**
@@ -573,6 +619,47 @@ function applyOneFilter(data, filter) {
   return data;
 }
 
+/**
+ * 从公式字符串中解析出引用的指标 key（与 METRIC_KEY_MAP 一致），
+ * 用于通用地聚合公式依赖的原始指标（ROI/AOV/CPC/CPM 等任意公式都适用）。
+ */
+function getReferencedMetricKeys(formulaStr) {
+  if (!formulaStr || typeof formulaStr !== 'string') return [];
+  var knownKeys = Object.keys(METRIC_KEY_MAP);
+  var found = [];
+  for (var i = 0; i < knownKeys.length; i++) {
+    var k = knownKeys[i];
+    if (new RegExp('\\b' + k + '\\b').test(formulaStr)) found.push(k);
+  }
+  return found;
+}
+
+/**
+ * 在 Sheet 端执行公式计算（与前端 evalFormula 逻辑一致）：
+ * formula 支持任意合法表达式，如 conversionValue/cost、(cost/impressions)*1000、cost/linkClicks 等。
+ * context 的 key 为指标 id（与前端一致）：cost, conversionValue, linkClicks, impressions, conversion 等。
+ */
+function evalFormulaForSheet(formula, context) {
+  try {
+    var expr = String(formula || '');
+    var keys = Object.keys(context || {}).sort(function(a, b) {
+      return b.length - a.length; // 先替换长 key，避免短 key 误伤
+    });
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      var re = new RegExp('\\b' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'g');
+      expr = expr.replace(re, '(' + (context[key] || 0) + ')');
+    }
+    // 安全起见，只允许数字和 + - * / . () 空格
+    if (/[^0-9\+\-\*\/\(\)\. ]/.test(expr)) return 0;
+    var result = eval(expr);
+    if (typeof result !== 'number' || !isFinite(result)) return 0;
+    return result;
+  } catch (e) {
+    return 0;
+  }
+}
+
 // ==================== 列选择 & 数据构建 ====================
 
 // 维度 key 到数据列名的映射
@@ -669,42 +756,92 @@ function buildSheetData(data, columns) {
 
 /**
  * 透视聚合：按 preset.rows + preset.columns 分组，对 preset.values 求和
- * 输出与前端透视表一致的汇总数据
+ * 并按用户公式（如 ROI = conversionValue / cost）计算派生指标，
+ * 尽量与前端透视表的计算逻辑保持一致。
  */
-function buildPivotSheetData(data, preset) {
+function buildPivotSheetData(data, preset, formulas) {
   var rowDimKeys = (preset.rows || []);
   var colDimKeys = (preset.columns || []);
   var valueKeys = (preset.values || []);
-  
+
   // 将 key 映射为实际数据列名
   var rowDimCols = rowDimKeys.map(function(k) { return DIMENSION_KEY_MAP[k] || k; });
   var colDimCols = colDimKeys.map(function(k) { return DIMENSION_KEY_MAP[k] || k; });
-  var valueCols = valueKeys.map(function(k) { return METRIC_KEY_MAP[k] || k; });
-  
+
+  // 将 formulas 按名称构建索引（name 与前端一致，例如 'ROI'）
+  var formulaByName = {};
+  if (formulas && formulas.length) {
+    for (var fi = 0; fi < formulas.length; fi++) {
+      var f = formulas[fi];
+      if (f && f.name) {
+        formulaByName[f.name] = f;
+      }
+    }
+  }
+
+  // 拆分：基础指标 key 与 公式指标 key（如 ROI、AOV、CPC、CPM）
+  var baseValueKeys = [];
+  var formulaKeys = [];
+  for (var vk = 0; vk < valueKeys.length; vk++) {
+    var k = valueKeys[vk];
+    if (formulaByName[k]) formulaKeys.push(k);
+    else baseValueKeys.push(k);
+  }
+
+  // 公式可能引用未在 preset.values 中的指标，需一并聚合（通用支持 AOV/CPC/CPM 等）
+  var requiredKeys = baseValueKeys.slice();
+  for (var fi = 0; fi < formulaKeys.length; fi++) {
+    var fDef = formulaByName[formulaKeys[fi]];
+    if (!fDef || !fDef.formula) continue;
+    var refs = getReferencedMetricKeys(fDef.formula);
+    for (var ri = 0; ri < refs.length; ri++) {
+      if (requiredKeys.indexOf(refs[ri]) === -1) requiredKeys.push(refs[ri]);
+    }
+  }
+  var requiredCols = requiredKeys.map(function(k) { return METRIC_KEY_MAP[k] || null; }).filter(Boolean);
+  var baseValueCols = baseValueKeys.map(function(k) { return METRIC_KEY_MAP[k] || k; });
+
   // 所有维度列合并（行维度 + 列维度）
   var allDimCols = rowDimCols.concat(colDimCols);
   
-  if (allDimCols.length === 0 && valueCols.length === 0) {
+  if (allDimCols.length === 0 && valueKeys.length === 0) {
     return buildSheetData(data, getDisplayColumns(preset, data));
   }
   
   // 如果没有维度只有指标，输出全局汇总一行
   if (allDimCols.length === 0) {
     var totals = {};
-    valueCols.forEach(function(col) { totals[col] = 0; });
+    requiredCols.forEach(function(col) { totals[col] = 0; });
     data.forEach(function(row) {
-      valueCols.forEach(function(col) {
+      requiredCols.forEach(function(col) {
         totals[col] += (parseFloat(row[col]) || 0);
       });
     });
-    var header = valueCols;
-    var totalRow = valueCols.map(function(col) {
-      return Math.round(totals[col] * 100) / 100;
+    var header = baseValueCols.slice();
+    var totalRow = baseValueCols.map(function(col) {
+      return Math.round((totals[col] || 0) * 100) / 100;
     });
+
+    if (formulaKeys.length > 0) {
+      var ctxTotals = {};
+      requiredKeys.forEach(function(key) {
+        var colName = METRIC_KEY_MAP[key];
+        ctxTotals[key] = colName ? (totals[colName] || 0) : 0;
+      });
+      for (var fk = 0; fk < formulaKeys.length; fk++) {
+        var fName = formulaKeys[fk];
+        var fDef = formulaByName[fName];
+        if (!fDef) continue;
+        header.push(fName);
+        var val = evalFormulaForSheet(fDef.formula, ctxTotals);
+        totalRow.push(Math.round(val * 100) / 100);
+      }
+    }
+
     return [header, totalRow];
   }
   
-  // 按维度组合生成分组 key，聚合指标
+  // 按维度组合生成分组 key，聚合所有公式依赖的指标列（requiredCols）
   var groups = {};
   var groupOrder = [];
   
@@ -717,11 +854,11 @@ function buildPivotSheetData(data, preset) {
     
     if (!groups[groupKey]) {
       groups[groupKey] = { dims: groupKeyParts, values: {} };
-      valueCols.forEach(function(col) { groups[groupKey].values[col] = 0; });
+      requiredCols.forEach(function(col) { groups[groupKey].values[col] = 0; });
       groupOrder.push(groupKey);
     }
     
-    valueCols.forEach(function(col) {
+    requiredCols.forEach(function(col) {
       groups[groupKey].values[col] += (parseFloat(row[col]) || 0);
     });
   }
@@ -737,8 +874,8 @@ function buildPivotSheetData(data, preset) {
     return 0;
   });
   
-  // 构建表头
-  var header = allDimCols.concat(valueCols);
+  // 构建表头（基础指标列 + 公式列）
+  var header = allDimCols.concat(baseValueCols, formulaKeys);
   var result = [header];
   
   // 构建数据行（多行维度时去掉连续重复值，与前端显示一致）
@@ -760,11 +897,31 @@ function buildPivotSheetData(data, preset) {
       lastDims = group.dims.slice();
     }
     
-    var outputRow = displayDims.concat(
-      valueCols.map(function(col) {
-        return Math.round(group.values[col] * 100) / 100;
-      })
-    );
+    // 基础指标输出（按 preset.values 中的顺序）
+    var metricValues = baseValueCols.map(function(col) {
+      return Math.round((group.values[col] || 0) * 100) / 100;
+    });
+
+    // 公式上下文：包含所有公式依赖的指标（requiredKeys），通用支持 ROI/AOV/CPC/CPM 等
+    var ctx = {};
+    for (var ri2 = 0; ri2 < requiredKeys.length; ri2++) {
+      var key2 = requiredKeys[ri2];
+      var colName2 = METRIC_KEY_MAP[key2];
+      ctx[key2] = colName2 ? (group.values[colName2] || 0) : 0;
+    }
+    var formulaValues = [];
+    for (var fk2 = 0; fk2 < formulaKeys.length; fk2++) {
+      var fname = formulaKeys[fk2];
+      var fdef = formulaByName[fname];
+      if (!fdef) {
+        formulaValues.push(0);
+      } else {
+        var fv = evalFormulaForSheet(fdef.formula, ctx);
+        formulaValues.push(Math.round(fv * 100) / 100);
+      }
+    }
+
+    var outputRow = displayDims.concat(metricValues, formulaValues);
     result.push(outputRow);
   }
   
@@ -773,13 +930,38 @@ function buildPivotSheetData(data, preset) {
     var grandTotal = allDimCols.map(function(_, idx) {
       return idx === 0 ? '总计' : '';
     });
-    valueCols.forEach(function(col) {
+    baseValueCols.forEach(function(col) {
       var sum = 0;
       for (var g = 0; g < groupOrder.length; g++) {
         sum += groups[groupOrder[g]].values[col];
       }
       grandTotal.push(Math.round(sum * 100) / 100);
     });
+
+    // 总计行的公式列（上下文用 requiredKeys，与分组行一致）
+    if (formulaKeys.length > 0) {
+      var ctxGrand = {};
+      for (var ri3 = 0; ri3 < requiredKeys.length; ri3++) {
+        var key3 = requiredKeys[ri3];
+        var colName3 = METRIC_KEY_MAP[key3];
+        if (!colName3) continue;
+        var sumMetric = 0;
+        for (var g2 = 0; g2 < groupOrder.length; g2++) {
+          sumMetric += groups[groupOrder[g2]].values[colName3] || 0;
+        }
+        ctxGrand[key3] = sumMetric;
+      }
+      for (var fk3 = 0; fk3 < formulaKeys.length; fk3++) {
+        var fname3 = formulaKeys[fk3];
+        var fdef3 = formulaByName[fname3];
+        if (!fdef3) {
+          grandTotal.push(0);
+        } else {
+          var gv = evalFormulaForSheet(fdef3.formula, ctxGrand);
+          grandTotal.push(Math.round(gv * 100) / 100);
+        }
+      }
+    }
     result.push(grandTotal);
   }
   
@@ -934,4 +1116,56 @@ function updateUserConfig(sheet, user, projectId, type, data) {
   
   // 未找到则追加新行
   sheet.appendRow([user, projectId, type, JSON.stringify(data)]);
+}
+
+// ==================== Web App 入口：测试发送 ====================
+
+/**
+ * 处理「发送测试邮件」请求（由前端 action = 'testScheduledReport' 调用）
+ * 与定时任务共用 executeTask，真正拉数据、生成表格、发邮件。
+ * 在您现有的 doPost 中：解析 POST body 为 JSON 后，若 action === 'testScheduledReport'，
+ * 调用本函数并返回其返回值（TextOutput JSON）。
+ *
+ * @param {Object} postData - { action, user, projectId, task }
+ * @return {TextOutput} JSON { status: 'success' | 'error', message?: string }
+ */
+function handleTestScheduledReport(postData) {
+  var result = { status: 'error', message: '' };
+  try {
+    if (!postData || postData.action !== 'testScheduledReport' || !postData.user || !postData.projectId || !postData.task) {
+      result.message = '缺少参数 action/user/projectId/task';
+      return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+    }
+    var task = postData.task;
+    if (!task.emails || !task.emails.length) {
+      result.message = '请填写收件邮箱';
+      return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+    }
+    if (!task.pivotPresetIds || !task.pivotPresetIds.length) {
+      result.message = '请至少选择一个报告';
+      return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var configSheet = ss.getSheetByName(USER_CONFIGS_SHEET);
+    if (!configSheet) {
+      result.message = '找不到 UserConfigs 工作表';
+      return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+    }
+    var allConfigs = getAllUserConfigs(configSheet);
+    var config = {
+      user: String(postData.user),
+      projectId: String(postData.projectId),
+      type: 'scheduledReports',
+      data: {}
+    };
+    var logEntry = executeTask(task, config, allConfigs);
+    result.status = logEntry.status === 'SUCCESS' ? 'success' : 'error';
+    result.message = logEntry.errorMessage || '';
+    return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+  } catch (e) {
+    result.message = e.message || String(e);
+    Logger.log('handleTestScheduledReport 异常: ' + result.message);
+    return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+  }
 }

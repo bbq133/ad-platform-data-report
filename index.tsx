@@ -72,7 +72,7 @@ import { AI_CONFIG, generateAnalysisPrompt, cleanAiResponseText } from './ai-con
 import { API_CONFIG, getDefaultDateRange, ProjectOption } from './api-config';
 import { fetchAllPlatformsData, transformApiDataToRawData, fetchProjectList, extractUniqueAccounts, fetchUserConfig, saveUserConfig } from './api-service';
 import LoginPage from './LoginPage';
-import ScheduledReportsPanel from './ScheduledReportsPanel';
+import ScheduledReportsPanel, { type ScheduledReportTask, type ScheduledReportLog } from './ScheduledReportsPanel';
 import { getUserSession, saveUserSession, clearUserSession, filterProjectsByKeywords, UserInfo, fetchSystemConfig, saveSystemConfig, getSystemConfig } from './auth-service';
 import { initTracking, trackLogin, trackProjectSelect, trackFetchData, trackExportData, trackSaveConfig, trackSavePivotPreset, trackAiAnalysis } from './tracking-service';
 
@@ -1022,6 +1022,10 @@ const App = () => {
   /** 修改报告名称：正在编辑的报告 id，非空时显示重命名弹窗 */
   const [renamePresetId, setRenamePresetId] = useState<string | null>(null);
   const [renamePresetNameInput, setRenamePresetNameInput] = useState('');
+  // 定时报表任务与发送记录（提升到父组件，切换 Tab 不丢失）
+  const [scheduledReportTasks, setScheduledReportTasks] = useState<ScheduledReportTask[]>([]);
+  const [scheduledReportLogs, setScheduledReportLogs] = useState<ScheduledReportLog[]>([]);
+  const [isLoadingScheduledReports, setIsLoadingScheduledReports] = useState(false);
 
   // 切换平台/Google 类型时自动重置 segment 到默认值
   useEffect(() => {
@@ -1203,6 +1207,9 @@ const App = () => {
 
   useEffect(() => {
     const key = getPivotPresetsStorageKey();
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '6554c0' }, body: JSON.stringify({ sessionId: '6554c0', location: 'index.tsx:pivotPresets-effect', message: 'pivotPresets effect run', data: { key: key ?? null, hasUser: !!currentUser?.username, hasProject: !!selectedProject?.projectId }, timestamp: Date.now(), hypothesisId: 'H1' }) }).catch(() => {});
+    // #endregion
     if (!key) {
       setPivotPresets([]);
       return;
@@ -1214,6 +1221,9 @@ const App = () => {
       if (raw) {
         const list = JSON.parse(raw) as PivotPreset[];
         setPivotPresets(Array.isArray(list) ? list : []);
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '6554c0' }, body: JSON.stringify({ sessionId: '6554c0', location: 'index.tsx:local-read', message: 'pivotPresets from local', data: { key, localCount: Array.isArray(list) ? list.length : 0 }, timestamp: Date.now(), hypothesisId: 'H1' }) }).catch(() => {});
+        // #endregion
       } else {
         setPivotPresets([]);
       }
@@ -1221,14 +1231,19 @@ const App = () => {
       setPivotPresets([]);
     }
 
-    // 2) 再读云端（覆盖本地）
+    // 2) 再读云端（仅在有有效云端数据时覆盖，避免请求失败或返回 null 时把本地/已展示的列表清空）
     let cancelled = false;
     const loadFromCloud = async () => {
       if (!currentUser?.username || !selectedProject?.projectId) return;
       const cloud = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'pivotPresets');
+      if (cancelled) return;
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '6554c0' }, body: JSON.stringify({ sessionId: '6554c0', location: 'index.tsx:cloud-fetch', message: 'pivotPresets cloud result', data: { cloudIsNull: cloud == null, cloudKeys: cloud && typeof cloud === 'object' ? Object.keys(cloud) : [] }, timestamp: Date.now(), hypothesisId: 'H1' }) }).catch(() => {});
+      // #endregion
+      // 云端无数据（null/失败）时不覆盖，保留当前已展示的列表
+      if (cloud == null) return;
       const store = normalizePivotPresetsPayload(cloud);
       const accountKey = getPivotAccountKey();
-      // 优先用当前 accountKey 的预设；若无则合并所有 accountKey 的预设，确保已保存报告能展示
       let list = store.byAccountKey[accountKey] || [];
       if (list.length === 0 && store.byAccountKey && Object.keys(store.byAccountKey).length > 0) {
         const seen = new Set<string>();
@@ -1252,6 +1267,48 @@ const App = () => {
       cancelled = true;
     };
   }, [currentUser?.username, selectedProject?.projectId, selectedAccounts.join('|')]);
+
+  // --- 定时报表任务：与报告预设一致，在选项目时加载，仅云端有数据时覆盖，避免切换 Tab 后列表丢失 ---
+  useEffect(() => {
+    if (!currentUser?.username || !selectedProject?.projectId) {
+      return;
+    }
+    let cancelled = false;
+    setIsLoadingScheduledReports(true);
+    const load = async () => {
+      const data = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'scheduledReports');
+      // #region agent log
+      try {
+        const safeSummary =
+          data == null
+            ? { isNull: true, type: typeof data, hasTasksField: false }
+            : typeof data === 'string'
+              ? { isNull: false, type: 'string', hasTasksField: false }
+              : { isNull: false, type: typeof data, hasTasksField: !!(data as any).tasks };
+        fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '6554c0' },
+          body: JSON.stringify({
+            sessionId: '6554c0',
+            location: 'index.tsx:scheduledReports-load',
+            message: 'scheduledReports fetch result',
+            data: safeSummary,
+            timestamp: Date.now(),
+            hypothesisId: 'H4',
+          }),
+        }).catch(() => {});
+      } catch (_) {}
+      // #endregion
+      if (cancelled) return;
+      setIsLoadingScheduledReports(false);
+      if (data == null) return;
+      const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+      setScheduledReportTasks(parsed.tasks ?? []);
+      setScheduledReportLogs(parsed.logs ?? []);
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [currentUser?.username, selectedProject?.projectId]);
 
   // --- BI 指标卡配置：云端读写（按账号维度存储） ---
   const getBiAccountKey = () => {
@@ -4860,11 +4917,23 @@ const App = () => {
             )}
 
             {/* --- 报告定时任务面板 --- */}
-            {projectMainTab === 'scheduled' && currentUser && (
+            {(() => {
+              // #region agent log
+              const willRender = projectMainTab === 'scheduled' && !!currentUser && !!selectedProject;
+              fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '6554c0' }, body: JSON.stringify({ sessionId: '6554c0', location: 'index.tsx:scheduled-tab-render', message: 'scheduled tab render decision', data: { projectMainTab, hasCurrentUser: !!currentUser, hasSelectedProject: !!selectedProject, willRender }, timestamp: Date.now(), hypothesisId: 'H2' }) }).catch(() => {});
+              // #endregion
+              return null;
+            })()}
+            {projectMainTab === 'scheduled' && currentUser && selectedProject && (
               <ScheduledReportsPanel
                 currentUser={currentUser}
                 selectedProject={selectedProject}
                 pivotPresets={pivotPresets.map(p => ({ id: p.id, name: p.name }))}
+                tasks={scheduledReportTasks}
+                setTasks={setScheduledReportTasks}
+                logs={scheduledReportLogs}
+                setLogs={setScheduledReportLogs}
+                isLoadingScheduledReports={isLoadingScheduledReports}
               />
             )}
           </div>
