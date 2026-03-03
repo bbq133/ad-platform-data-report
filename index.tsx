@@ -273,6 +273,7 @@ const getSegmentOptions = (platform: 'facebook' | 'google', googleType?: GoogleT
       { key: 'asset_group_date', label: 'Asset Group Date（默认数据源）', isDefault: true },
       { key: 'age_date', label: 'Age（年龄）' },
       { key: 'gender_adset_date', label: 'Gender（性别）' },
+      { key: 'country_campaign_date', label: 'Country（国家）' },
     ];
   }
   if (googleType === 'SEARCH') {
@@ -283,6 +284,7 @@ const getSegmentOptions = (platform: 'facebook' | 'google', googleType?: GoogleT
       { key: 'gender_adset_date', label: 'Gender（性别）' },
       { key: 'asset_group_date', label: 'Asset Group（资产组）' },
       { key: 'age_date', label: 'Age（年龄）' },
+      { key: 'country_campaign_date', label: 'Country（国家）' },
     ];
   }
   if (googleType === 'VIDEO') {
@@ -290,6 +292,7 @@ const getSegmentOptions = (platform: 'facebook' | 'google', googleType?: GoogleT
       { key: 'ad_date', label: 'Ad Date（默认数据源）', isDefault: true },
       { key: 'age_date', label: 'Age（年龄）' },
       { key: 'gender_adset_date', label: 'Gender（性别）' },
+      { key: 'country_campaign_date', label: 'Country（国家）' },
     ];
   }
   if (googleType === 'SHOPPING') {
@@ -297,6 +300,7 @@ const getSegmentOptions = (platform: 'facebook' | 'google', googleType?: GoogleT
       { key: 'ad_date', label: 'Ad Date（默认数据源）', isDefault: true },
       { key: 'age_date', label: 'Age（年龄）' },
       { key: 'gender_adset_date', label: 'Gender（性别）' },
+      { key: 'country_campaign_date', label: 'Country（国家）' },
     ];
   }
   // DEMAND_GEN
@@ -304,6 +308,7 @@ const getSegmentOptions = (platform: 'facebook' | 'google', googleType?: GoogleT
     { key: 'ad_date', label: 'Ad Date（默认数据源）', isDefault: true },
     { key: 'age_date', label: 'Age（年龄）' },
     { key: 'gender_adset_date', label: 'Gender（性别）' },
+    { key: 'country_campaign_date', label: 'Country（国家）' },
   ];
 };
 
@@ -337,7 +342,7 @@ const PIVOT_SEGMENT_MODE_OPTIONS: Array<{ key: PivotSegmentMode; label: string }
   { key: 'age_gender', label: 'Age + Gender（年龄+性别，仅 Meta）' },
   { key: 'age', label: 'Age（年龄）' },
   { key: 'gender', label: 'Gender（性别）' },
-  { key: 'country', label: 'Country（国家，仅 Meta）' },
+  { key: 'country', label: 'Country（国家）' },
   { key: 'keyword', label: 'Keyword（关键词，仅 Google Search）' },
   { key: 'search_term', label: 'Search Term（搜索词，仅 Google Search）' },
 ];
@@ -353,7 +358,7 @@ const PIVOT_PLATFORM_OPTIONS: Array<{ key: PivotPlatformScope; label: string }> 
 
 /** Segment 模式对应允许的平台范围；未列出的 segment 表示所有平台均可选 */
 const SEGMENT_ALLOWED_PLATFORMS: Partial<Record<PivotSegmentMode, PivotPlatformScope[]>> = {
-  country: ['meta'],
+  country: ['meta', 'google_search', 'google_demand_gen', 'google_performance_max', 'google_video', 'google_shopping'],
   keyword: ['google_search'],
   search_term: ['google_search'],
   age_gender: ['meta'],
@@ -692,6 +697,7 @@ const App = () => {
   const [apiError, setApiError] = useState<string>('');
   const [availableAccounts, setAvailableAccounts] = useState<{ id: string; name: string }[]>([]);
   const [apiDateRange, setApiDateRange] = useState(getDefaultDateRange());
+  const [includePrevPeriod, setIncludePrevPeriod] = useState(false);
   // 首次获取报告时的时间范围，报告面板内的时间选择只能在此范围内
   const [reportDateRangeBounds, setReportDateRangeBounds] = useState<{ start: string; end: string } | null>(null);
 
@@ -1365,7 +1371,8 @@ const App = () => {
       const colName = getColumnNameForSource(source as ColumnSource);
       colSamples[source] = String(sampleRow[colName] ?? '').trim();
     });
-    const countrySample = activePlatformTab === 'facebook' ? String(sampleRow[curMap.country] || '').trim() : '';
+    const countryCol = curMap.country || 'Country';
+    const countrySample = String(sampleRow[countryCol] || '').trim();
     return {
       campaign: String(sampleRow[curMap.campaign] || ''),
       adSet: String(sampleRow[curMap.adSet] || ''),
@@ -1435,7 +1442,7 @@ const App = () => {
           dims[conf.label] = sourceVal || 'N/A';
         } else if (conf.source === 'country') {
           const sourceCol = curMap.country || 'Country';
-          dims[conf.label] = platformValue === 'facebook' ? (String(row[sourceCol] ?? '').trim() || 'N/A') : 'N/A';
+          dims[conf.label] = (String(row[sourceCol] ?? '').trim() || 'N/A');
         } else {
           const sourceCol = curMap[conf.source as keyof MappingConfig];
           const sourceVal = String(row[sourceCol] || '');
@@ -1524,7 +1531,7 @@ const App = () => {
 
   /**
    * 行是否落入某维度的数据源（基于 segment 匹配）
-   * - country → Meta 平台 segment=country_campaign_date
+   * - country → 所有平台 segment=country_campaign_date
    * - age → Meta+Google 各类型 segment=age_date
    * - gender → Meta+Google 各类型 segment=gender_adset_date
    * - searchKeyword → Google Search segment=keyword_date
@@ -1535,9 +1542,9 @@ const App = () => {
   const isInDimensionDataSource = (row: any, source: string): boolean => {
     const seg = (row.__segments || '').toLowerCase();
 
-    // country → 仅 Meta 平台 country_campaign_date segment
+    // country → 所有平台 country_campaign_date segment
     if (source === 'country') {
-      return row._platform === 'facebook' && seg === 'country_campaign_date';
+      return seg === 'country_campaign_date';
     }
 
     // age → 所有平台 age_date segment
@@ -1686,6 +1693,7 @@ const App = () => {
 
   // 上期数据：与 dateRange 等长、紧挨着的前一段，用于 BI 看板环比
   const lastPeriodFilteredData = useMemo(() => {
+    if (!includePrevPeriod) return [];
     if (!dateRange.start || !dateRange.end) return [];
     const startD = new Date(dateRange.start);
     const endD = new Date(dateRange.end);
@@ -1717,7 +1725,7 @@ const App = () => {
       }
     }
     return data;
-  }, [baseProcessedData, dateRange.start, dateRange.end, dashboardPlatformFilter, dimFilters, biPlatformFilter, biGoogleTypeFilter]);
+  }, [includePrevPeriod, baseProcessedData, dateRange.start, dateRange.end, dashboardPlatformFilter, dimFilters, biPlatformFilter, biGoogleTypeFilter]);
 
   const aggregatedTrendData = useMemo(() => {
     const daily: Record<string, any> = {};
@@ -1833,10 +1841,6 @@ const App = () => {
         return isDefaultSegmentRow(row);
       }
       const targetSeg = PIVOT_SEGMENT_MODE_MAP[pivotSegmentMode];
-      // Country segment 仅 Meta 有
-      if (pivotSegmentMode === 'country' && row._platform !== 'facebook') {
-        return isDefaultSegmentRow(row);
-      }
       // Age + Gender segment 仅 Meta 有
       if (pivotSegmentMode === 'age_gender' && row._platform !== 'facebook') {
         return isDefaultSegmentRow(row);
@@ -2153,6 +2157,7 @@ const App = () => {
       ad: pick(hdrs, ['ad name', 'creative'], existing.ad, (h) => /\bad\s*id\b|^adid$/i.test(h)),
       age: pick(hdrs, ['age'], existing.age),
       gender: pick(hdrs, ['gender'], existing.gender),
+      country: pick(hdrs, ['country'], existing.country),
       cost: pick(hdrs, ['amount spent', 'spend', 'cost'], existing.cost),
       impressions: pick(hdrs, ['impressions'], existing.impressions),
       reach: pick(hdrs, ['reach'], existing.reach),
@@ -2287,19 +2292,18 @@ const App = () => {
     if (project.adsCostReport) {
       setIsLoadingAccounts(true);
       try {
-        // 优化：获取账号列表时只查询最近3天的数据，大幅提升响应速度
+        // 优化：获取账号列表时仅查询最近2天（昨天+今天），在保证有数据的前提下比3天更快
         const today = new Date();
         const quickEndDate = today.toISOString().split('T')[0];
         const quickStartDate = new Date(today);
-        quickStartDate.setDate(quickStartDate.getDate() - 2); // 最近3天
+        quickStartDate.setDate(quickStartDate.getDate() - 1); // 最近2天
         const quickStart = quickStartDate.toISOString().split('T')[0];
 
-        // Fetch accounts for the selected project using shortened date range
         const apiData = await fetchAllPlatformsData(
           project.projectId,
           quickStart,
           quickEndDate,
-          undefined // Fetch all accounts for initial list
+          undefined
         );
         const accounts = extractUniqueAccounts(apiData);
         setAvailableAccounts(accounts);
@@ -2323,13 +2327,15 @@ const App = () => {
     setApiError('');
 
     try {
-      // 方案 A：拉数时扩大日期范围（上期+本期），用于 BI 看板环比
-      const startD = new Date(apiDateRange.start);
-      const endD = new Date(apiDateRange.end);
-      const days = Math.round((endD.getTime() - startD.getTime()) / (24 * 60 * 60 * 1000)) + 1;
-      const expandedStartD = new Date(startD);
-      expandedStartD.setDate(expandedStartD.getDate() - days);
-      const expandedStart = expandedStartD.toISOString().split('T')[0];
+      let expandedStart = apiDateRange.start;
+      if (includePrevPeriod) {
+        const startD = new Date(apiDateRange.start);
+        const endD = new Date(apiDateRange.end);
+        const days = Math.round((endD.getTime() - startD.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+        const expandedStartD = new Date(startD);
+        expandedStartD.setDate(expandedStartD.getDate() - days);
+        expandedStart = expandedStartD.toISOString().split('T')[0];
+      }
 
       const apiData = await fetchAllPlatformsData(
         selectedProject.projectId,
@@ -2872,9 +2878,10 @@ const App = () => {
     };
     const curCtx = sumContext(cur);
     const lastCtx = sumContext(last);
+    const hasPrev = includePrevPeriod && last.length > 0;
     const pct = (curr: number, prev: number) =>
       prev !== 0 ? ((curr - prev) / prev) * 100 : (curr !== 0 ? 100 : 0);
-    const subStr = (change: number) => `${change >= 0 ? '+' : ''}${change.toFixed(1)}% vs last period`;
+    const subStr = (change: number) => hasPrev ? `${change >= 0 ? '+' : ''}${change.toFixed(1)}% vs last period` : '';
     const downIsGood = (key: string) => /cost|cpc|cpm|cpa|cpatc|cps|cpl/i.test(key);
     const metricLabelMap = new Map(allAvailableMetrics.map(m => [m.key, m.label]));
     const getMetricValue = (key: string, ctx: Record<string, number>) => {
@@ -2929,7 +2936,7 @@ const App = () => {
 
     const byId = new Map(cards.map(c => [c.id, c]));
     return biCardOrder.map(id => byId.get(id)).filter(Boolean) as typeof cards;
-  }, [biFilteredData, lastPeriodFilteredData, biCardOrder, allAvailableMetrics, formulaByName, customMetricLabels, biCardOptions]);
+  }, [biFilteredData, lastPeriodFilteredData, includePrevPeriod, biCardOrder, allAvailableMetrics, formulaByName, customMetricLabels, biCardOptions]);
 
   // Conditional rendering for LoginPage
   if (!isLoggedIn) {
@@ -3037,14 +3044,19 @@ const App = () => {
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-6">
               {biKpiCards.map((k, idx) => (
-                <div key={idx} className="bg-slate-900/50 p-8 rounded-[40px] border border-slate-800 shadow-sm flex flex-col justify-between h-44 hover:shadow-xl transition-all group">
+                <div
+                  key={idx}
+                  className={`bg-slate-900/50 p-8 rounded-[40px] border border-slate-800 shadow-sm flex flex-col hover:shadow-xl transition-all group h-44 ${k.sub ? 'justify-between' : 'justify-center gap-1'}`}
+                >
                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{k.label}</span>
                   <div>
                     <span className="text-3xl font-black text-white tracking-tight">{k.value}</span>
-                    <p className={`text-[10px] font-black mt-2 flex items-center gap-1 ${k.isImprovement ? 'text-emerald-500' : 'text-rose-500'}`}>
-                      {k.trend === 'up' ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                      {k.sub}
-                    </p>
+                    {k.sub && (
+                      <p className={`text-[10px] font-black mt-2 flex items-center gap-1 ${k.isImprovement ? 'text-emerald-500' : 'text-rose-500'}`}>
+                        {k.trend === 'up' ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                        {k.sub}
+                      </p>
+                    )}
                   </div>
                 </div>
               ))}
@@ -3364,7 +3376,7 @@ const App = () => {
                       {pivotSegmentMode === 'default' && '各平台使用默认数据源（Meta=Ad Date, Pmax=Asset Group Date, 其他=Ad Date）'}
                       {pivotSegmentMode === 'age' && '查看年龄维度拆分数据'}
                       {pivotSegmentMode === 'gender' && '查看性别维度拆分数据'}
-                      {pivotSegmentMode === 'country' && '查看国家维度拆分数据（仅 Meta 有此层级，Google 回退默认）'}
+                      {pivotSegmentMode === 'country' && '查看国家维度拆分数据（支持 Meta 与 Google 平台）'}
                       {pivotSegmentMode === 'keyword' && '查看关键词维度拆分数据（仅 Google Search 有此层级，其他回退默认）'}
                       {pivotSegmentMode === 'search_term' && '查看搜索词维度拆分数据（仅 Google Search 有此层级，其他回退默认）'}
                       {pivotSegmentMode === 'age_gender' && '同时查看年龄+性别维度拆分数据（仅 Meta 有此层级，Google 回退默认）'}
@@ -3985,7 +3997,31 @@ const App = () => {
 
                     {/* Date Range */}
                     <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block">2. 选择时间范围 (最近15天)</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block">2. 选择时间范围</label>
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const end = new Date();
+                            const start = new Date(end); start.setDate(start.getDate() - 6);
+                            setApiDateRange({ start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] });
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white/10 text-slate-300 hover:bg-white/20 border border-white/20 transition"
+                        >
+                          近7天
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const end = new Date();
+                            const start = new Date(end); start.setDate(start.getDate() - 14);
+                            setApiDateRange({ start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] });
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white/10 text-slate-300 hover:bg-white/20 border border-white/20 transition"
+                        >
+                          近15天
+                        </button>
+                      </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <span className="text-[9px] text-slate-500 uppercase block mb-1">开始日期</span>
@@ -4006,6 +4042,15 @@ const App = () => {
                           />
                         </div>
                       </div>
+                      <button
+                        onClick={() => setIncludePrevPeriod(prev => !prev)}
+                        className={`mt-3 flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all ${includePrevPeriod ? 'bg-blue-600/20 text-blue-300 border border-blue-500/40' : 'bg-white/5 text-slate-400 border border-white/10 hover:bg-white/10'}`}
+                      >
+                        <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${includePrevPeriod ? 'bg-blue-500 border-blue-400' : 'border-slate-500'}`}>
+                          {includePrevPeriod && <Check size={10} className="text-white" strokeWidth={4} />}
+                        </div>
+                        同时拉取上一周期数据（用于 BI 看板环比对比）
+                      </button>
                     </div>
 
                     {/* Account Selector (Optional) */}
@@ -4046,6 +4091,18 @@ const App = () => {
                         {apiError}
                       </div>
                     )}
+
+                    {/* Hint: long range may be slow */}
+                    {apiDateRange.start && apiDateRange.end && (() => {
+                      const start = new Date(apiDateRange.start);
+                      const end = new Date(apiDateRange.end);
+                      const days = Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+                      return days >= 10 ? (
+                        <p className="text-[11px] text-slate-500 mb-2">
+                          时间范围较大时拉取可能需 30 秒～1 分钟，可先选「近7天」加快加载。
+                        </p>
+                      ) : null;
+                    })()}
 
                     {/* Load Button */}
                     <button
@@ -4456,13 +4513,11 @@ const App = () => {
                               <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.gender}>{namingSamples.gender || 'N/A'}</div>
                             </div>
 
-                            {/* Facebook 专属：Country（所有 segment 下均显示） */}
-                            {activePlatformTab === 'facebook' && (
-                              <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                                <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Country</label>
-                                <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={(namingSamples as Record<string, string>).country}>{(namingSamples as Record<string, string>).country || 'N/A'}</div>
-                              </div>
-                            )}
+                            {/* Country（Meta 与 Google 均支持 country 层级） */}
+                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Country</label>
+                              <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={(namingSamples as Record<string, string>).country}>{(namingSamples as Record<string, string>).country || 'N/A'}</div>
+                            </div>
 
                             {/* Google Demand Gen 专属：全部列维度样本 */}
                             {activePlatformTab === 'google' && activeGoogleType === 'DEMAND_GEN' && (

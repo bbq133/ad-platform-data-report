@@ -94,7 +94,6 @@ export async function fetchAllPlatformsData(
         filterAccountIdList
     };
 
-    // 并行请求两个平台的数据
     const [facebookData, googleData] = await Promise.all([
         fetchAdData({ ...baseParams, platform: 'facebook' }).catch(() => []),
         fetchAdData({ ...baseParams, platform: 'google' }).catch(() => [])
@@ -344,5 +343,63 @@ export async function saveUserConfig(
     } catch (e) {
         console.error('Failed to save user config:', e);
         return false;
+    }
+}
+
+/**
+ * 定时报表 - 前端测试发送任务 payload
+ * 与 ScheduledReportsPanel 中的 ScheduledReportTask 结构保持一致的子集
+ */
+export interface ScheduledReportTaskPayload {
+    id?: string;
+    active: boolean;
+    name: string;
+    frequency: 'daily' | 'weekly';
+    timeOfDay: string;
+    weekDay?: number;
+    dateRangePreset: 'last3' | 'last7' | 'last15' | 'last30' | 'custom';
+    customDateStart?: string;
+    customDateEnd?: string;
+    pivotPresetIds: string[];
+    emails: string[];
+}
+
+/**
+ * 触发一次性的定时报表测试发送
+ * 依赖 Apps Script Web App 在 doPost 中实现 action = 'testScheduledReport'
+ */
+export async function testSendScheduledReport(
+    username: string,
+    projectId: string | number,
+    task: ScheduledReportTaskPayload
+): Promise<void> {
+    const url = GOOGLE_SHEETS_CONFIG.GAS_API_URL;
+
+    const payload = {
+        action: 'testScheduledReport',
+        user: username,
+        projectId,
+        task
+    };
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            // 与 saveUserConfig 保持一致，避免复杂 CORS 预检
+            headers: {
+                'Content-Type': 'text/plain;charset=utf-8',
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+
+        if (result.status !== 'success') {
+            throw new Error(result.message || '测试发送失败');
+        }
+    } catch (e) {
+        console.error('Failed to test send scheduled report:', e);
+        // 抛出错误给调用方，在 UI 中展示
+        throw e;
     }
 }

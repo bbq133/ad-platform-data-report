@@ -19,7 +19,7 @@ import {
   Send,
   History
 } from 'lucide-react';
-import { fetchUserConfig, saveUserConfig } from './api-service';
+import { fetchUserConfig, saveUserConfig, testSendScheduledReport, type ScheduledReportTaskPayload } from './api-service';
 import type { ProjectOption } from './api-config';
 import type { UserInfo } from './auth-service';
 import { trackScheduledTaskCreate, trackScheduledTaskEdit, trackScheduledTaskDelete, trackScheduledTaskToggle, trackScheduledTaskSend } from './tracking-service';
@@ -123,10 +123,12 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
   const [logs, setLogs] = useState<ScheduledReportLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
   const [editingTask, setEditingTask] = useState<ScheduledReportTask | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'tasks' | 'history'>('tasks');
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [testMessage, setTestMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // --- Form state ---
   const [formName, setFormName] = useState('');
@@ -224,6 +226,7 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
     setFormCustomDateStart('');
     setFormCustomDateEnd('');
     setEditingTask(null);
+    setTestMessage(null);
   };
 
   const openCreateForm = () => {
@@ -282,6 +285,116 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
     saveTasks(updatedTasks);
     setIsFormOpen(false);
     resetForm();
+  };
+
+  const handleTestSend = async () => {
+    const trimmedName = formName.trim();
+    if (!trimmedName) {
+      setTestMessage({ type: 'error', text: '请先填写任务名称' });
+      return;
+    }
+    if (formPresetIds.length === 0) {
+      setTestMessage({ type: 'error', text: '请至少选择一个要发送的报告' });
+      return;
+    }
+    const emailList = formEmails.split(/[,;\n]+/).map(e => e.trim()).filter(Boolean);
+    if (emailList.length === 0) {
+      setTestMessage({ type: 'error', text: '请填写至少一个收件邮箱' });
+      return;
+    }
+
+    const taskPayload: ScheduledReportTaskPayload = {
+      id: editingTask?.id,
+      active: true,
+      name: trimmedName,
+      frequency: formFrequency,
+      timeOfDay: formTimeOfDay,
+      weekDay: formFrequency === 'weekly' ? formWeekDay : undefined,
+      dateRangePreset: formDateRangePreset,
+      customDateStart: formDateRangePreset === 'custom' ? formCustomDateStart : undefined,
+      customDateEnd: formDateRangePreset === 'custom' ? formCustomDateEnd : undefined,
+      pivotPresetIds: formPresetIds,
+      emails: emailList,
+    };
+
+    setIsTesting(true);
+    setTestMessage(null);
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': 'a5658f',
+      },
+      body: JSON.stringify({
+        sessionId: 'a5658f',
+        runId: 'initial',
+        hypothesisId: 'H1',
+        location: 'ScheduledReportsPanel.tsx:handleTestSend',
+        message: '点击测试发送按钮',
+        data: {
+          hasName: !!trimmedName,
+          presetCount: formPresetIds.length,
+          emailCount: emailList.length,
+          frequency: formFrequency,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+
+    try {
+      await testSendScheduledReport(currentUser.username, selectedProject.projectId, taskPayload);
+
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': 'a5658f',
+        },
+        body: JSON.stringify({
+          sessionId: 'a5658f',
+          runId: 'initial',
+          hypothesisId: 'H2',
+          location: 'ScheduledReportsPanel.tsx:handleTestSend',
+          message: '测试发送成功',
+          data: {
+            taskId: taskPayload.id || null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+
+      setTestMessage({ type: 'success', text: '测试邮件已发送，请稍后在收件邮箱中查收（不会影响定时任务配置）' });
+    } catch (e: any) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c27d0ba6-23f9-43d9-8065-11770db1de6e', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': 'a5658f',
+        },
+        body: JSON.stringify({
+          sessionId: 'a5658f',
+          runId: 'initial',
+          hypothesisId: 'H3',
+          location: 'ScheduledReportsPanel.tsx:handleTestSend',
+          message: '测试发送失败',
+          data: {
+            errorMessage: e?.message || String(e),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+
+      setTestMessage({ type: 'error', text: e?.message || '测试发送失败，请稍后重试或联系管理员检查后端配置' });
+    } finally {
+      setIsTesting(false);
+    }
   };
 
   const handleDeleteTask = (id: string) => {
@@ -635,22 +748,44 @@ const ScheduledReportsPanel: React.FC<Props> = ({ currentUser, selectedProject, 
                     </button>
                   </div>
 
-                  {/* Submit */}
-                  <div className="flex items-center gap-3 pt-2">
-                    <button
-                      onClick={handleFormSubmit}
-                      disabled={!formName.trim() || formPresetIds.length === 0 || !formEmails.trim() || isSaving}
-                      className="flex-1 flex items-center justify-center gap-2 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-bold rounded-xl transition-all"
-                    >
-                      <Send className="w-4 h-4" />
-                      {isSaving ? '保存中...' : (editingTask ? '更新任务' : '创建任务')}
-                    </button>
-                    <button
-                      onClick={() => { setIsFormOpen(false); resetForm(); }}
-                      className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all"
-                    >
-                      取消
-                    </button>
+                  {/* Submit & Test Send */}
+                  <div className="space-y-2 pt-2">
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={handleFormSubmit}
+                        disabled={!formName.trim() || formPresetIds.length === 0 || !formEmails.trim() || isSaving}
+                        className="flex-1 flex items-center justify-center gap-2 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-bold rounded-xl transition-all"
+                      >
+                        <Send className="w-4 h-4" />
+                        {isSaving ? '保存中...' : (editingTask ? '更新任务' : '创建任务')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleTestSend}
+                        disabled={!formName.trim() || formPresetIds.length === 0 || !formEmails.trim() || isTesting}
+                        className="px-4 py-3 rounded-xl text-sm font-bold border border-slate-600 text-slate-200 hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+                      >
+                        <Send className="w-4 h-4" />
+                        {isTesting ? '测试发送中...' : '发送测试邮件'}
+                      </button>
+                      <button
+                        onClick={() => { setIsFormOpen(false); resetForm(); }}
+                        className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all"
+                      >
+                        取消
+                      </button>
+                    </div>
+                    {testMessage && (
+                      <div
+                        className={`text-xs font-bold px-3 py-2 rounded-lg ${
+                          testMessage.type === 'success'
+                            ? 'bg-emerald-900/30 text-emerald-400'
+                            : 'bg-red-900/30 text-red-400'
+                        }`}
+                      >
+                        {testMessage.text}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

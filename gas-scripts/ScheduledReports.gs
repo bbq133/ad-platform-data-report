@@ -484,10 +484,6 @@ function filterBySegmentMode(data, segmentMode) {
     var platform = (row['__platform'] || '').toLowerCase();
     var campaignType = (row['__campaignType'] || '').toUpperCase();
     
-    // country segment 仅 Meta 有
-    if (segmentMode === 'country' && platform.indexOf('facebook') < 0) {
-      return isDefaultSegmentRow(row);
-    }
     // keyword / search_term segment 仅 Google Search 有
     if ((segmentMode === 'keyword' || segmentMode === 'search_term') &&
       !(platform.indexOf('google') >= 0 && campaignType === 'SEARCH')) {
