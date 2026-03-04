@@ -961,6 +961,17 @@ const App = () => {
   // --- New Dashboard Features States ---
   const [newDimensionName, setNewDimensionName] = useState('');
   const [isAddingDimension, setIsAddingDimension] = useState(false);
+  const dimLeftPanelRef = useRef<HTMLDivElement>(null);
+  const [dimLeftPanelHeight, setDimLeftPanelHeight] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    const el = dimLeftPanelRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) setDimLeftPanelHeight(entry.contentRect.height + 48);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Data Quality Report States
   const [selectedQualityDimension, setSelectedQualityDimension] = useState<string>('');
@@ -4474,15 +4485,121 @@ const App = () => {
                   {/* Bottom Row: Dimensions */}
                   {mappingTab === 'dimensions' && (
                     <div className="bg-slate-900/50 border border-slate-800 rounded-[40px] p-10 shadow-2xl space-y-10">
-                      <div>
-                        <h3 className="text-2xl font-black flex items-center gap-4 text-white"><Split className="text-purple-400" /> 维度参数配置</h3>
+                      <div className="space-y-5">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="space-y-2">
+                            <h3 className="text-2xl font-black flex items-center gap-4 text-white"><Split className="text-purple-400" /> 维度参数配置</h3>
+                            <p className="text-xs text-slate-400 leading-relaxed max-w-2xl">在这里统一配置命名中的字段规范，系统会根据这些字段在报表中自动拆解为筛选维度，方便你按 Age、Country、Gender 等维度分析投放效果。</p>
+                          </div>
+                          <div className="relative group/help shrink-0">
+                            <button className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-800 border border-slate-700 text-slate-400 hover:text-indigo-400 hover:border-indigo-600 transition-all">
+                              <HelpCircle size={16} />
+                            </button>
+                            <div className="absolute right-0 top-10 z-50 w-80 p-5 bg-slate-800 border border-slate-600 rounded-2xl shadow-2xl shadow-black/40 opacity-0 invisible group-hover/help:opacity-100 group-hover/help:visible transition-all duration-200 pointer-events-none group-hover/help:pointer-events-auto">
+                              <p className="text-[11px] font-bold text-white mb-2">什么是维度参数配置？</p>
+                              <p className="text-[10px] text-slate-300 leading-relaxed mb-3">在这里定义广告系列命名中各个字段的写法（如国家、年龄、性别等）。系统会根据这些设置，从命名里自动拆解出对应维度。</p>
+                              <p className="text-[11px] font-bold text-white mb-1.5">配置后可用于：</p>
+                              <ul className="text-[10px] text-slate-300 leading-relaxed space-y-1">
+                                <li className="flex items-start gap-1.5"><span className="text-purple-400 mt-0.5">•</span>报表中按 Age、Country、Gender 等维度筛选</li>
+                                <li className="flex items-start gap-1.5"><span className="text-purple-400 mt-0.5">•</span>分析不同人群 / 国家的投放效果对比</li>
+                                <li className="flex items-start gap-1.5"><span className="text-purple-400 mt-0.5">•</span>精细化归因与多维数据透视</li>
+                              </ul>
+                              <div className="mt-3 pt-3 border-t border-slate-700">
+                                <p className="text-[10px] text-slate-400"><span className="text-indigo-400 font-bold">建议：</span>先在这里定好统一规范，再按照示例去给广告命名。</p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 三步流程提示 */}
+                        <div className="flex items-center gap-3 bg-slate-800/60 border border-slate-700/60 rounded-2xl px-5 py-3.5">
+                          <div className="flex items-center gap-2.5">
+                            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-indigo-600 text-[9px] font-black text-white shrink-0">1</span>
+                            <span className="text-[10px] font-bold text-slate-300">选择命名中要用的字段</span>
+                          </div>
+                          <ChevronRight size={14} className="text-slate-600 shrink-0" />
+                          <div className="flex items-center gap-2.5">
+                            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-purple-600 text-[9px] font-black text-white shrink-0">2</span>
+                            <span className="text-[10px] font-bold text-slate-300">为每个字段定义取值规范</span>
+                          </div>
+                          <ChevronRight size={14} className="text-slate-600 shrink-0" />
+                          <div className="flex items-center gap-2.5">
+                            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-600 text-[9px] font-black text-white shrink-0">3</span>
+                            <span className="text-[10px] font-bold text-slate-300">报表自动按这些字段拆解维度</span>
+                          </div>
+                        </div>
                       </div>
 
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                      {/* 命名预览示例 */}
+                      <div className="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-5 space-y-4">
+                        <div className="flex items-center gap-2">
+                          <Lightbulb size={14} className="text-amber-400" />
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">命名示例 · How It Works</span>
+                        </div>
+
+                        <div className="space-y-3">
+                          <p className="text-[10px] text-slate-400 leading-relaxed">以 Campaign 命名为例，使用 <span className="text-white font-bold">-</span>（中划线）分隔各字段：</p>
+                          <div className="flex items-end gap-0 flex-wrap bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
+                            {['GOC', 'GG', 'Brand', 'Lifecycle', 'Competitors', 'CPA', 'Pmax', 'BrandEdge', 'BrandEdge', 'I/V', 'Prospecting', 'CS', 'TR', '20251210'].map((part, i) => {
+                              const highlighted = (part === 'TR' || part === 'Lifecycle');
+                              const dimLabel = part === 'TR' ? '广告目标' : part === 'Lifecycle' ? '产品型号' : null;
+                              return (
+                                <React.Fragment key={i}>
+                                  {i > 0 && <span className="text-slate-500 text-[11px] font-mono mx-0.5 self-end pb-1">-</span>}
+                                  <span className={`inline-flex flex-col items-center rounded-md px-1.5 py-1 ${highlighted ? 'bg-purple-500/15 border border-purple-500/30' : ''}`}>
+                                    {dimLabel && <span className="text-[8px] font-black text-purple-400 leading-none mb-0.5">{dimLabel}</span>}
+                                    <span className={`text-[10px] font-medium leading-none ${highlighted ? 'text-white' : 'text-slate-500'}`}>{part}</span>
+                                  </span>
+                                </React.Fragment>
+                              );
+                            })}
+                          </div>
+                          <div className="flex items-start gap-4 mt-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-2.5 h-2.5 rounded-sm bg-purple-500/30 border border-purple-500/40 shrink-0" />
+                              <span className="text-[9px] text-slate-400">= 已配置为报表维度的字段（可按此筛选）</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-2.5 h-2.5 rounded-sm bg-slate-800/60 shrink-0" />
+                              <span className="text-[9px] text-slate-400">= 命名中的其他字段</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="border-t border-slate-700/50 pt-3 space-y-1.5">
+                          <p className="text-[10px] text-slate-400 leading-relaxed">在右侧为每个维度选择 <span className="text-white font-bold">来源字段</span>（如 Campaign Naming）、<span className="text-white font-bold">分隔方式</span>（中划线/下划线）和 <span className="text-white font-bold">位置</span>（Part 序号），系统会从命名中自动提取对应字段作为报表维度。</p>
+                          <p className="text-[9px] text-slate-500">例如上方示例：选择来源「Campaign (Naming)」→ 分隔符「- (中划线)」→ Part 12 即可提取 <span className="text-purple-400 font-bold">TR</span> 作为「广告目标」维度。</p>
+                        </div>
+
+                        {/* 直接取值维度 */}
+                        {(() => {
+                          const directDims = dimConfigs.filter(d => d.index === -1 && !['campaign', 'adSet', 'ad'].includes(d.source)).slice(0, 5);
+                          return directDims.length > 0 ? (
+                            <div className="border-t border-slate-700/50 pt-3 space-y-2">
+                              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">独立维度字段（直接取值）</p>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                {directDims.map(d => (
+                                  <span key={d.label} className="inline-flex items-center gap-1.5 bg-emerald-950/40 border border-emerald-800/30 rounded-lg px-2.5 py-1.5">
+                                    <span className="text-[9px] font-black text-emerald-400 uppercase">{d.label}</span>
+                                    <span className="text-[10px] text-slate-400">→</span>
+                                    <span className="text-[10px] text-slate-300 font-medium">{(namingSamples as Record<string, string>)[d.source] || `{${d.source}}`}</span>
+                                  </span>
+                                ))}
+                              </div>
+                              <p className="text-[9px] text-slate-500">这些维度不需要从命名中拆分，系统会直接从数据列中读取对应值。</p>
+                            </div>
+                          ) : null;
+                        })()}
+                      </div>
+
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
                         {/* Left Side: Samples */}
-                        <div className="lg:col-span-1 bg-slate-800 rounded-3xl p-6 space-y-6 border border-slate-700 shadow-inner h-fit">
-                          <div className="flex items-center justify-between">
+                        <div ref={dimLeftPanelRef} className="lg:col-span-1 bg-slate-800 rounded-3xl p-6 space-y-6 border border-slate-700 shadow-inner h-fit">
+                          <div className="space-y-3">
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2"><TableIcon size={12} /> NAMING CONVENTION SAMPLES</p>
+                            <div className="bg-indigo-950/40 border border-indigo-800/30 rounded-xl px-3 py-2.5">
+                              <p className="text-[10px] text-indigo-300/90 leading-relaxed">左侧展示你广告数据中实际使用的命名样本，右侧则根据这些命名定义拆分规则。请确保命名格式统一，以便系统准确拆解维度。</p>
+                            </div>
                           </div>
 
                           {/* Platform Selector */}
@@ -4592,15 +4709,14 @@ const App = () => {
                           </div>
                         </div>
 
-                        {/* Right Side: Dimension Rules（行高参考左侧 NAMING CONVENTION SAMPLE） */}
-                        <div className="lg:col-span-2 space-y-2 max-h-[520px] overflow-y-auto overflow-x-hidden pr-2 custom-scrollbar">
+                        {/* Right Side: Dimension Rules */}
+                        <div className="lg:col-span-2 space-y-2 overflow-y-auto overflow-x-hidden pr-2 custom-scrollbar" style={dimLeftPanelHeight ? { maxHeight: dimLeftPanelHeight } : undefined}>
                           {allDimensions.map(dim => {
                             const existing = dimConfigs.find(d => d.label === dim);
                             const currentSource = existing?.source || 'campaign';
                             const currentDelimiter = existing?.delimiter || '_';
                             const isColumnSource = ALL_COLUMN_SOURCES.includes(currentSource as ColumnSource);
                             const isDirect = existing != null && (existing.index === -1 || isColumnSource);
-                            /** 取值方式：直接取值 | 下划线 | 中划线；列维度仅直接取值 */
                             const segmentStyle = isDirect ? 'direct' : (currentDelimiter === '-' ? '-' : '_');
                             const sampleStr = (namingSamples as Record<string, string>)[currentSource] ?? '';
                             const sampleParts = sampleStr ? sampleStr.split(currentDelimiter) : [];
