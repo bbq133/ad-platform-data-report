@@ -2349,12 +2349,13 @@ const App = () => {
     if (project.adsCostReport) {
       setIsLoadingAccounts(true);
       try {
-        // 优化：获取账号列表时仅查询最近2天（昨天+今天），在保证有数据的前提下比3天更快
         const today = new Date();
-        const quickEndDate = today.toISOString().split('T')[0];
-        const quickStartDate = new Date(today);
-        quickStartDate.setDate(quickStartDate.getDate() - 1); // 最近2天
-        const quickStart = quickStartDate.toISOString().split('T')[0];
+        const qEnd = new Date(today);
+        qEnd.setDate(qEnd.getDate() - 3);
+        const quickEndDate = qEnd.toISOString().split('T')[0];
+        const qStart = new Date(today);
+        qStart.setDate(qStart.getDate() - 4);
+        const quickStart = qStart.toISOString().split('T')[0];
 
         const apiData = await fetchAllPlatformsData(
           project.projectId,
