@@ -26,12 +26,13 @@ async function fetchAndExportList() {
 
   try {
     let data = [];
+    // Doris 要求平台参数大写：FACEBOOK / GOOGLE
     for (const platform of ['facebook', 'google']) {
       const queryParams = new URLSearchParams({
         projectId: String(projectId),
         startDate,
         endDate,
-        platform
+        platform: platform.toUpperCase()
       });
       const url = `${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINT}?${queryParams}`;
       const response = await fetch(url, {

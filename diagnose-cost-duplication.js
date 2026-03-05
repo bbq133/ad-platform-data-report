@@ -134,11 +134,12 @@ async function diagnose() {
 }
 
 async function fetchData(projectId, startDate, endDate, platform, segmentList) {
+  // Doris 要求平台参数大写
   const queryParams = new URLSearchParams({
     projectId: String(projectId),
     startDate,
     endDate,
-    platform
+    platform: (platform || '').toUpperCase()
   });
   segmentList.forEach(seg => queryParams.append('segment', seg));
   const url = `${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINT}?${queryParams}`;

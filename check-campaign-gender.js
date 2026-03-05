@@ -47,12 +47,12 @@ async function checkCampaignGenderData() {
 
 async function testQuery(projectId, startDate, endDate, platform, segmentList, targetCampaign) {
   try {
-    // 构建查询参数
+    // Doris 要求平台参数大写
     const queryParams = new URLSearchParams({
       projectId,
       startDate,
       endDate,
-      platform
+      platform: (platform || '').toUpperCase()
     });
 
     // 添加 segment 参数

@@ -282,11 +282,12 @@ function fetchAdDataFromApi(projectId, startDate, endDate) {
   
   for (var p = 0; p < platforms.length; p++) {
     try {
+      // Doris 要求平台参数大写：FACEBOOK / GOOGLE
       var url = AD_API_BASE + '/project/adsData/getAllFilterData'
         + '?projectId=' + projectId
         + '&startDate=' + startDate
         + '&endDate=' + endDate
-        + '&platform=' + platforms[p];
+        + '&platform=' + platforms[p].toUpperCase();
       
       var options = {
         method: 'get',

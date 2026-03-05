@@ -24,11 +24,12 @@ async function generateDetailedReport() {
   console.log('=' .repeat(120) + '\n');
 
   try {
+    // Doris 要求平台参数大写
     const queryParams = new URLSearchParams({
       projectId,
       startDate,
       endDate,
-      platform
+      platform: (platform || '').toUpperCase()
     });
 
     const url = `${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINT}?${queryParams}`;

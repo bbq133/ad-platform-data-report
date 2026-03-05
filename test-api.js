@@ -27,12 +27,12 @@ async function testAgeGenderData() {
   console.log('- Segments:', segmentList.join(', '));
   console.log('\n' + '='.repeat(80) + '\n');
 
-  // 构建查询参数
+  // Doris 要求平台参数大写
   const queryParams = new URLSearchParams({
     projectId,
     startDate,
     endDate,
-    platform
+    platform: (platform || '').toUpperCase()
   });
 
   // 添加 segment 参数

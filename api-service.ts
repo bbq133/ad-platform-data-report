@@ -9,11 +9,12 @@ import { API_CONFIG, GOOGLE_SHEETS_CONFIG, ApiRequestParams, ApiDataRow, ApiResp
  * 从 API 获取广告数据
  */
 export async function fetchAdData(params: ApiRequestParams): Promise<ApiDataRow[]> {
+    // Doris 要求平台参数大写：FACEBOOK / GOOGLE / ALL
     const queryParams = new URLSearchParams({
         projectId: params.projectId.toString(),
         startDate: params.startDate,
         endDate: params.endDate,
-        platform: params.platform
+        platform: (params.platform || '').toUpperCase()
     });
 
     // 添加 Campaign ID 筛选
