@@ -1551,6 +1551,11 @@ const App = () => {
       if (dateVal) dates.add(dateVal);
 
       const dims: Record<string, string> = {};
+      const normalizeDimValue = (v: unknown): string => {
+        if (v == null) return 'N/A';
+        const s = String(v).trim();
+        return (s === '' || s.toUpperCase() === 'NULL') ? 'N/A' : s;
+      };
       dimConfigs.forEach(conf => {
         if (ALL_COLUMN_SOURCES.includes(conf.source as ColumnSource)) {
           const scope = COLUMN_SOURCE_TO_SCOPE[conf.source as ColumnSource];
@@ -1559,7 +1564,7 @@ const App = () => {
             (scope === 'google_search' && platformValue === 'google' && googleType === 'SEARCH') ||
             (scope === 'google_demand_gen' && platformValue === 'google' && googleType === 'DEMAND_GEN');
           const colName = getColumnNameForSource(conf.source as ColumnSource);
-          dims[conf.label] = matchesScope ? (String(row[colName] ?? '').trim() || 'N/A') : 'N/A';
+          dims[conf.label] = matchesScope ? (normalizeDimValue(row[colName]) || 'N/A') : 'N/A';
         } else if (conf.source === 'platform') {
           if (platformValue === 'google') {
             dims[conf.label] = `Google - ${googleType}`;
@@ -1570,20 +1575,22 @@ const App = () => {
           }
         } else if (conf.source === 'age' || conf.source === 'gender') {
           const sourceCol = curMap[conf.source] || (conf.source === 'age' ? 'Age' : 'Gender');
-          const sourceVal = String(row[sourceCol] ?? row[conf.source === 'age' ? 'Age' : 'Gender'] ?? '');
-          dims[conf.label] = sourceVal || 'N/A';
+          const sourceVal = row[sourceCol] ?? row[conf.source === 'age' ? 'Age' : 'Gender'];
+          dims[conf.label] = normalizeDimValue(sourceVal) || 'N/A';
         } else if (conf.source === 'country') {
           const sourceCol = curMap.country || 'Country';
-          dims[conf.label] = (String(row[sourceCol] ?? '').trim() || 'N/A');
+          dims[conf.label] = normalizeDimValue(row[sourceCol]) || 'N/A';
         } else {
           const sourceCol = curMap[conf.source as keyof MappingConfig];
-          const sourceVal = String(row[sourceCol] || '');
+          const rawVal = row[sourceCol];
           // index === -1 表示直接取值（不按分隔符拆段），与 gender/age 一致
           if (conf.index === -1) {
-            dims[conf.label] = sourceVal || 'N/A';
+            dims[conf.label] = normalizeDimValue(rawVal) || 'N/A';
           } else {
+            const sourceVal = String(rawVal || '');
             const parts = sourceVal.split(conf.delimiter || '_');
-            dims[conf.label] = parts[conf.index] ?? 'N/A';
+            const partVal = parts[conf.index];
+            dims[conf.label] = normalizeDimValue(partVal) || 'N/A';
           }
         }
       });
@@ -2191,11 +2198,15 @@ const App = () => {
       colKeys.push('__grand_total__');
     }
 
+    const formatPivotDimDisplay = (s: string) =>
+      (!s || s === 'N/A' || s.toUpperCase() === 'NULL') ? '—' : s;
     const colLabels: Record<string, string> = {};
     colKeys.forEach(key => {
       if (key === '__all__') colLabels[key] = '全部';
       else if (key === '__grand_total__') colLabels[key] = '总计';
-      else colLabels[key] = (colKeyMap.get(key) || []).join(' / ') || '全部';
+      else {
+        colLabels[key] = (colKeyMap.get(key) || []).map(formatPivotDimDisplay).join(' / ') || '全部';
+      }
     });
 
     const rowKeyArrs = rowOrder.map(k => rowKeyMap.get(k) || []);
@@ -3724,54 +3735,84 @@ const App = () => {
                   <div className="overflow-x-auto custom-scrollbar no-scrollbar-at-small pb-4">
                     <table className="w-full text-left border-separate border-spacing-y-2 min-w-[900px]">
                       <thead>
-                        <tr>
-                          {(pivotResult?.rowDims.length ? pivotResult.rowDims : ['维度']).map((h, idx) => (
-                            <th key={idx} rowSpan={pivotResult?.valueKeys.length && pivotResult.valueKeys.length > 1 ? 2 : 1} className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-900/50 sticky left-0 z-20 min-w-[140px]">
-                              {h}
-                            </th>
-                          ))}
-                          {pivotResult?.colKeys.map(colKey => (
-                            pivotResult.valueKeys.length === 1 ? (
-                              <th
-                                key={colKey}
-                                className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center cursor-pointer hover:bg-slate-700/50 select-none"
-                                onClick={() => {
-                                  const vk = pivotResult.valueKeys[0];
-                                  setPivotSort(prev => prev?.colKey === colKey && prev?.valueKey === vk && prev.dir === 'asc' ? { colKey, valueKey: vk, dir: 'desc' } : { colKey, valueKey: vk, dir: 'asc' });
-                                }}
-                              >
-                                <span className="inline-flex items-center gap-1">
-                                  {colKey === '__all__'
-                                    ? (pivotValueMeta.get(pivotResult.valueKeys[0])?.label || pivotResult.valueKeys[0])
-                                    : pivotResult.colLabels[colKey]}
-                                  {pivotSort?.colKey === colKey && pivotSort?.valueKey === pivotResult.valueKeys[0] && (pivotSort.dir === 'asc' ? <ChevronUp size={12} className="opacity-80" /> : <ChevronDown size={12} className="opacity-80" />)}
-                                </span>
-                              </th>
-                            ) : (
-                              <th key={colKey} colSpan={pivotResult.valueKeys.length} className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
-                                {pivotResult.colLabels[colKey]}
-                              </th>
-                            )
-                          ))}
-                        </tr>
-                        {pivotResult?.valueKeys.length && pivotResult.valueKeys.length > 1 && (
-                          <tr>
-                            {pivotResult.colKeys.map(colKey => (
-                              pivotResult.valueKeys.map(vk => (
-                                <th
-                                  key={`${colKey}-${vk}`}
-                                  className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right whitespace-nowrap cursor-pointer hover:bg-slate-700/50 select-none"
-                                  onClick={() => setPivotSort(prev => prev?.colKey === colKey && prev?.valueKey === vk && prev.dir === 'asc' ? { colKey, valueKey: vk, dir: 'desc' } : { colKey, valueKey: vk, dir: 'asc' })}
-                                >
-                                  <span className="inline-flex items-center gap-1 justify-end w-full">
-                                    {pivotValueMeta.get(vk)?.label || vk}
-                                    {pivotSort?.colKey === colKey && pivotSort?.valueKey === vk && (pivotSort.dir === 'asc' ? <ChevronUp size={12} className="opacity-80" /> : <ChevronDown size={12} className="opacity-80" />)}
-                                  </span>
-                                </th>
-                              ))
-                            ))}
-                          </tr>
-                        )}
+                        {(() => {
+                          const multiValue = pivotResult?.valueKeys.length && pivotResult.valueKeys.length > 1;
+                          const dataColKeys = pivotResult?.colKeys.filter((k: string) => k !== '__grand_total__') ?? [];
+                          const singleEmptyCol = multiValue && dataColKeys.length === 1 && pivotResult.colLabels[dataColKeys[0]] === '—';
+                          const collapseHeader = singleEmptyCol;
+                          const rowSpan = collapseHeader ? 1 : (multiValue ? 2 : 1);
+                          return (
+                            <>
+                              <tr>
+                                {(pivotResult?.rowDims.length ? pivotResult.rowDims : ['维度']).map((h, idx) => (
+                                  <th key={idx} rowSpan={rowSpan} className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-900/50 sticky left-0 z-20 min-w-[140px]">
+                                    {h}
+                                  </th>
+                                ))}
+                                {collapseHeader ? (
+                                  pivotResult.colKeys.flatMap((colKey: string) =>
+                                    colKey === '__grand_total__'
+                                      ? [<th key="gt" colSpan={pivotResult.valueKeys.length} className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">总计</th>]
+                                      : pivotResult.valueKeys.map(vk => (
+                                          <th
+                                            key={vk}
+                                            className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right whitespace-nowrap cursor-pointer hover:bg-slate-700/50 select-none"
+                                            onClick={() => setPivotSort(prev => prev?.colKey === colKey && prev?.valueKey === vk && prev.dir === 'asc' ? { colKey, valueKey: vk, dir: 'desc' } : { colKey, valueKey: vk, dir: 'asc' })}
+                                          >
+                                            <span className="inline-flex items-center gap-1 justify-end w-full">
+                                              {pivotValueMeta.get(vk)?.label || vk}
+                                              {pivotSort?.colKey === colKey && pivotSort?.valueKey === vk && (pivotSort.dir === 'asc' ? <ChevronUp size={12} className="opacity-80" /> : <ChevronDown size={12} className="opacity-80" />)}
+                                            </span>
+                                          </th>
+                                        ))
+                                  )
+                                ) : (
+                                  pivotResult?.colKeys.map(colKey => (
+                                    pivotResult.valueKeys.length === 1 ? (
+                                      <th
+                                        key={colKey}
+                                        className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center cursor-pointer hover:bg-slate-700/50 select-none"
+                                        onClick={() => {
+                                          const vk = pivotResult.valueKeys[0];
+                                          setPivotSort(prev => prev?.colKey === colKey && prev?.valueKey === vk && prev.dir === 'asc' ? { colKey, valueKey: vk, dir: 'desc' } : { colKey, valueKey: vk, dir: 'asc' });
+                                        }}
+                                      >
+                                        <span className="inline-flex items-center gap-1">
+                                          {colKey === '__all__'
+                                            ? (pivotValueMeta.get(pivotResult.valueKeys[0])?.label || pivotResult.valueKeys[0])
+                                            : pivotResult.colLabels[colKey]}
+                                          {pivotSort?.colKey === colKey && pivotSort?.valueKey === pivotResult.valueKeys[0] && (pivotSort.dir === 'asc' ? <ChevronUp size={12} className="opacity-80" /> : <ChevronDown size={12} className="opacity-80" />)}
+                                        </span>
+                                      </th>
+                                    ) : (
+                                      <th key={colKey} colSpan={pivotResult.valueKeys.length} className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
+                                        {pivotResult.colLabels[colKey]}
+                                      </th>
+                                    )
+                                  ))
+                                )}
+                              </tr>
+                              {multiValue && !collapseHeader && (
+                                <tr>
+                                  {pivotResult.colKeys.map(colKey => (
+                                    pivotResult.valueKeys.map(vk => (
+                                      <th
+                                        key={`${colKey}-${vk}`}
+                                        className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right whitespace-nowrap cursor-pointer hover:bg-slate-700/50 select-none"
+                                        onClick={() => setPivotSort(prev => prev?.colKey === colKey && prev?.valueKey === vk && prev.dir === 'asc' ? { colKey, valueKey: vk, dir: 'desc' } : { colKey, valueKey: vk, dir: 'asc' })}
+                                      >
+                                        <span className="inline-flex items-center gap-1 justify-end w-full">
+                                          {pivotValueMeta.get(vk)?.label || vk}
+                                          {pivotSort?.colKey === colKey && pivotSort?.valueKey === vk && (pivotSort.dir === 'asc' ? <ChevronUp size={12} className="opacity-80" /> : <ChevronDown size={12} className="opacity-80" />)}
+                                        </span>
+                                      </th>
+                                    ))
+                                  ))}
+                                </tr>
+                              )}
+                            </>
+                          );
+                        })()}
                       </thead>
                       <tbody>
                         {(() => {
@@ -3793,7 +3834,7 @@ const App = () => {
                               <tr key={row.key + idx} className={`border border-transparent ${isGrand ? 'bg-indigo-900/20' : isSubtotal ? 'bg-slate-800/60' : 'bg-slate-800/40'} rounded-3xl`}>
                                 {(pivotResult.rowDims.length ? pivotResult.rowDims : ['维度']).map((_, i) => (
                                   <td key={i} className={`px-4 py-3 text-xs font-black ${isGrand ? 'text-indigo-300' : isSubtotal ? 'text-slate-200' : 'text-white'} sticky left-0 bg-inherit z-10`}>
-                                    {displayCells[i] || ''}
+                                    {(!displayCells[i] || displayCells[i] === 'N/A' || displayCells[i].toUpperCase() === 'NULL') ? '—' : displayCells[i]}
                                   </td>
                                 ))}
                                 {pivotResult.colKeys.map(colKey => (
