@@ -748,8 +748,14 @@ const App = () => {
   // BI 看板专属切片器（仅影响 BI 指标卡 + 趋势图，不影响数据透视 / 洞察报告）
   const [biPlatformFilter, setBiPlatformFilter] = useState<'all' | 'meta' | 'google'>('all');
   const [biGoogleTypeFilter, setBiGoogleTypeFilter] = useState<'all' | GoogleType>('all');
+  /** BI 看板数据源筛选：Campaign/Ad Set/Ad 条件组，包含/不包含+文字，组内/组间且或（与透视表筛选器一致） */
+  const [biDataSourceFilterGroups, setBiDataSourceFilterGroups] = useState<PivotFilterGroup[]>([]);
+  const [biDataSourceGroupLogic, setBiDataSourceGroupLogic] = useState<'and' | 'or'>('and');
   const [isBiSlicerOpen, setIsBiSlicerOpen] = useState(false);
+  const [isBiDataSourceOpen, setIsBiDataSourceOpen] = useState(false);
   const biSlicerRef = useRef<HTMLDivElement>(null);
+  const biDataSourceRef = useRef<HTMLDivElement>(null);
+  const biConfigLoadedRef = useRef(false);
   const [activePlatformTab, setActivePlatformTab] = useState<'facebook' | 'google'>('facebook');
   const [activeGoogleType, setActiveGoogleType] = useState<GoogleType>('SEARCH');
   /** 当前选中的 segment（指标对齐/维度配置页用） */
@@ -1137,6 +1143,9 @@ const App = () => {
       if (biSlicerRef.current && !biSlicerRef.current.contains(event.target as Node)) {
         setIsBiSlicerOpen(false);
       }
+      if (biDataSourceRef.current && !biDataSourceRef.current.contains(event.target as Node)) {
+        setIsBiDataSourceOpen(false);
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -1341,25 +1350,47 @@ const App = () => {
     return [...selectedAccounts].sort().join('|');
   };
 
-  const normalizeBiConfigPayload = (data: any) => {
-    if (!data) return { byAccountKey: {} as Record<string, BiCardKey[]> };
-    if (Array.isArray(data)) return { byAccountKey: { all: data as BiCardKey[] } };
+  const normalizeBiConfigPayload = (data: any): {
+    byAccountKey: Record<string, BiCardKey[]>;
+    dataSourceFilterGroups?: PivotFilterGroup[];
+    dataSourceGroupLogic?: 'and' | 'or';
+    platformFilter?: 'all' | 'meta' | 'google';
+    googleTypeFilter?: string;
+  } => {
+    const base = { byAccountKey: {} as Record<string, BiCardKey[]> };
+    if (!data) return base;
+    if (Array.isArray(data)) return { ...base, byAccountKey: { all: data as BiCardKey[] } };
     if (data.byAccountKey && typeof data.byAccountKey === 'object') {
-      return { byAccountKey: data.byAccountKey as Record<string, BiCardKey[]> };
+      base.byAccountKey = data.byAccountKey as Record<string, BiCardKey[]>;
+    } else if (data.accountKey && Array.isArray(data.cards)) {
+      base.byAccountKey = { [data.accountKey]: data.cards as BiCardKey[] };
     }
-    if (data.accountKey && Array.isArray(data.cards)) {
-      return { byAccountKey: { [data.accountKey]: data.cards as BiCardKey[] } };
+    if (Array.isArray(data.dataSourceFilterGroups)) {
+      (base as any).dataSourceFilterGroups = data.dataSourceFilterGroups as PivotFilterGroup[];
     }
-    return { byAccountKey: {} as Record<string, BiCardKey[]> };
+    if (data.dataSourceGroupLogic === 'and' || data.dataSourceGroupLogic === 'or') {
+      (base as any).dataSourceGroupLogic = data.dataSourceGroupLogic;
+    }
+    if (data.platformFilter && ['all', 'meta', 'google'].includes(data.platformFilter)) {
+      (base as any).platformFilter = data.platformFilter;
+    }
+    if (data.googleTypeFilter != null) {
+      (base as any).googleTypeFilter = data.googleTypeFilter;
+    }
+    return base;
   };
 
-  const saveBiConfigToCloud = async (cards: BiCardKey[]) => {
+  const saveBiConfigToCloud = async (cards?: BiCardKey[]) => {
     if (!currentUser?.username || !selectedProject?.projectId) return;
     try {
       const accountKey = getBiAccountKey();
       const existing = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'bi');
       const store = normalizeBiConfigPayload(existing);
-      store.byAccountKey[accountKey] = cards;
+      store.byAccountKey[accountKey] = cards ?? biCardOrder;
+      (store as any).dataSourceFilterGroups = biDataSourceFilterGroups;
+      (store as any).dataSourceGroupLogic = biDataSourceGroupLogic;
+      (store as any).platformFilter = biPlatformFilter;
+      (store as any).googleTypeFilter = biGoogleTypeFilter;
       const ok = await saveUserConfig(currentUser.username, selectedProject.projectId, 'bi', store);
       if (!ok) console.warn('Failed to save BI config to cloud');
     } catch (e) {
@@ -1369,6 +1400,7 @@ const App = () => {
 
   useEffect(() => {
     if (!currentUser?.username || !selectedProject?.projectId) return;
+    biConfigLoadedRef.current = false;
     let cancelled = false;
     const loadBiConfig = async () => {
       const cloud = await fetchUserConfig(currentUser.username, selectedProject.projectId, 'bi');
@@ -1380,12 +1412,30 @@ const App = () => {
       if (!list.length) list = DEFAULT_BI_CARD_ORDER;
       if (cancelled) return;
       setBiCardOrder(list);
+      if (Array.isArray(store.dataSourceFilterGroups) && store.dataSourceFilterGroups.length >= 0) {
+        setBiDataSourceFilterGroups(store.dataSourceFilterGroups as PivotFilterGroup[]);
+      }
+      if (store.dataSourceGroupLogic === 'and' || store.dataSourceGroupLogic === 'or') {
+        setBiDataSourceGroupLogic(store.dataSourceGroupLogic);
+      }
+      if (store.platformFilter) setBiPlatformFilter(store.platformFilter);
+      if (store.googleTypeFilter != null) setBiGoogleTypeFilter(store.googleTypeFilter as typeof biGoogleTypeFilter);
+      if (!cancelled) biConfigLoadedRef.current = true;
     };
     loadBiConfig();
     return () => {
       cancelled = true;
     };
   }, [currentUser?.username, selectedProject?.projectId, selectedAccounts.join('|'), biCardOptions]);
+
+  // 筛选条件变更时自动持久化 BI 配置（数据源 / 平台 / 广告类型），下次进入项目自动恢复；仅加载完成后才写入避免覆盖云端
+  useEffect(() => {
+    if (!currentUser?.username || !selectedProject?.projectId || !biConfigLoadedRef.current) return;
+    const t = setTimeout(() => {
+      saveBiConfigToCloud();
+    }, 600);
+    return () => clearTimeout(t);
+  }, [biDataSourceFilterGroups, biDataSourceGroupLogic, biPlatformFilter, biGoogleTypeFilter]);
 
   const persistPivotPresets = (list: PivotPreset[]) => {
     const key = getPivotPresetsStorageKey();
@@ -1591,8 +1641,14 @@ const App = () => {
     return data;
   }, [baseProcessedData, dateRange, dashboardPlatformFilter, dimFilters]);
 
-  // BI 看板专属：在全局 filteredData 基础上，再叠加 BI 切片器过滤
-  const biFilteredData = useMemo(() => {
+  /** Campaign 层级维度标签（Campaign / Ad Set / Ad），用于 BI 数据源筛选 */
+  const biDataSourceDimLabels = useMemo(() => {
+    const sources = new Set(['campaign', 'adSet', 'ad']);
+    return dimConfigs.filter(d => sources.has(d.source as string)).map(d => d.label);
+  }, [dimConfigs]);
+
+  // 先按平台 + 广告类型过滤，得到「数据源可选范围」与后续应用数据源筛选的基准
+  const dataAfterBiPlatform = useMemo(() => {
     let data = filteredData;
     if (biPlatformFilter === 'meta') {
       data = data.filter(row => row._platform === 'facebook');
@@ -1604,6 +1660,30 @@ const App = () => {
     }
     return data;
   }, [filteredData, biPlatformFilter, biGoogleTypeFilter]);
+
+  /** 单条数据源条件对一行的匹配（仅包含/不包含+文字，与透视表一致） */
+  const evalBiDataSourceCondition = (row: any, c: PivotFilterCondition): boolean => {
+    const rawVal = String((row._dims && row._dims[c.fieldKey]) || '');
+    if (c.mode !== 'contains' && c.mode !== 'not_contains') return true;
+    if (!c.textValue || !c.textValue.trim()) return true;
+    const needle = c.textValue.trim().toLowerCase();
+    const hay = rawVal.toLowerCase();
+    if (c.mode === 'contains') return hay.includes(needle);
+    return !hay.includes(needle);
+  };
+
+  // BI 看板专属：在平台/类型基础上再叠加数据源条件组（包含/不包含+文字，组内且或、组间且或）
+  const biFilteredData = useMemo(() => {
+    if (!biDataSourceFilterGroups.length) return dataAfterBiPlatform;
+    return dataAfterBiPlatform.filter(row => {
+      const groupResults = biDataSourceFilterGroups.map(grp => {
+        if (grp.conditions.length === 0) return true;
+        const conditionResults = grp.conditions.map(c => evalBiDataSourceCondition(row, c));
+        return grp.logic === 'and' ? conditionResults.every(Boolean) : conditionResults.some(Boolean);
+      });
+      return biDataSourceGroupLogic === 'and' ? groupResults.every(Boolean) : groupResults.some(Boolean);
+    });
+  }, [dataAfterBiPlatform, biDataSourceFilterGroups, biDataSourceGroupLogic]);
 
   // --- Data Quality Report Logic ---
   const qualityDimensionLabels = useMemo(() =>
@@ -1806,8 +1886,19 @@ const App = () => {
         data = data.filter(row => row._googleType === biGoogleTypeFilter);
       }
     }
+    // BI 数据源筛选：与当期条件组一致（包含/不包含+文字）
+    if (biDataSourceFilterGroups.length > 0) {
+      data = data.filter(row => {
+        const groupResults = biDataSourceFilterGroups.map(grp => {
+          if (grp.conditions.length === 0) return true;
+          const conditionResults = grp.conditions.map(c => evalBiDataSourceCondition(row, c));
+          return grp.logic === 'and' ? conditionResults.every(Boolean) : conditionResults.some(Boolean);
+        });
+        return biDataSourceGroupLogic === 'and' ? groupResults.every(Boolean) : groupResults.some(Boolean);
+      });
+    }
     return data;
-  }, [includePrevPeriod, baseProcessedData, dateRange.start, dateRange.end, dashboardPlatformFilter, dimFilters, biPlatformFilter, biGoogleTypeFilter]);
+  }, [includePrevPeriod, baseProcessedData, dateRange.start, dateRange.end, dashboardPlatformFilter, dimFilters, biPlatformFilter, biGoogleTypeFilter, biDataSourceFilterGroups, biDataSourceGroupLogic]);
 
   const aggregatedTrendData = useMemo(() => {
     const daily: Record<string, any> = {};
@@ -1836,6 +1927,55 @@ const App = () => {
 
     return result.sort((a, b) => new Date(a._date).getTime() - new Date(b._date).getTime());
   }, [biFilteredData, formulas, customMetricLabels]);
+
+  // 上期按日聚合趋势（与 aggregatedTrendData 结构一致），用于 BI 核心指标趋势洞察中显示对比趋势
+  const lastPeriodAggregatedTrendData = useMemo(() => {
+    if (!includePrevPeriod || lastPeriodFilteredData.length === 0) return [];
+    const daily: Record<string, any> = {};
+    const baseKeys = [...BASE_METRICS, ...Object.keys(customMetricLabels)];
+
+    lastPeriodFilteredData.filter(isDefaultSegmentRow).forEach(row => {
+      const d = row._date;
+      if (!daily[d]) {
+        daily[d] = { _date: d };
+        baseKeys.forEach(k => daily[d][k] = 0);
+      }
+      baseKeys.forEach(k => {
+        daily[d][k] = (daily[d][k] || 0) + (row._metrics[k] || 0);
+      });
+    });
+
+    const result = Object.values(daily).map(dayData => {
+      const formulaResults: Record<string, number> = {};
+      formulas.forEach(f => {
+        formulaResults[f.name] = evalFormula(f.formula, dayData);
+      });
+      return { ...dayData, ...formulaResults };
+    });
+
+    return result.sort((a, b) => new Date(a._date).getTime() - new Date(b._date).getTime());
+  }, [includePrevPeriod, lastPeriodFilteredData, formulas, customMetricLabels]);
+
+  // 趋势图数据：配置了拉取对比数据时，按日序对齐合并当期与上期，便于同图展示两条趋势
+  const trendChartData = useMemo(() => {
+    const current = aggregatedTrendData;
+    const last = lastPeriodAggregatedTrendData;
+    const hasCompare = includePrevPeriod && last.length > 0;
+    if (!hasCompare) return current;
+
+    const baseKeys = [...BASE_METRICS, ...Object.keys(customMetricLabels)];
+    const formulaKeys = formulas.map(f => f.name);
+    const allKeys = [...new Set([...baseKeys, ...formulaKeys])];
+
+    return current.map((row, i) => {
+      const prevRow = last[i];
+      const prevFields: Record<string, number> = {};
+      allKeys.forEach(k => {
+        prevFields[`${k}_prev`] = prevRow != null ? (prevRow[k] ?? 0) : 0;
+      });
+      return { ...row, ...prevFields };
+    });
+  }, [aggregatedTrendData, lastPeriodAggregatedTrendData, includePrevPeriod, formulas, customMetricLabels]);
 
   const aggregateBy = (dimName: string) => {
     const groups: Record<string, any> = {};
@@ -2696,6 +2836,61 @@ const App = () => {
     }).filter((g): g is PivotFilterGroup => g != null));
   };
 
+  // --- BI 数据源筛选：Campaign/Ad Set/Ad 条件组（包含/不包含+文字，组内/组间且或）
+  const createBiDataSourceCondition = (fieldKey: string): PivotFilterCondition => ({
+    id: genId(),
+    fieldKey,
+    mode: 'contains',
+    textValue: '',
+    selectedValues: [],
+    dateRange: { start: '', end: '' },
+  });
+
+  const handleAddBiDataSourceFilter = (fieldKey: string) => {
+    setBiDataSourceFilterGroups(prev => {
+      if (prev.some(g => g.fieldKey === fieldKey)) return prev;
+      return [
+        ...prev,
+        {
+          id: genId(),
+          fieldKey,
+          label: fieldKey,
+          logic: 'and' as const,
+          conditions: [createBiDataSourceCondition(fieldKey)],
+        },
+      ];
+    });
+  };
+
+  const addBiDataSourceCondition = (groupId: string) => {
+    const grp = biDataSourceFilterGroups.find(g => g.id === groupId);
+    if (!grp) return;
+    setBiDataSourceFilterGroups(prev => prev.map(g => g.id !== groupId ? g : { ...g, conditions: [...g.conditions, createBiDataSourceCondition(grp.fieldKey)] }));
+  };
+
+  const updateBiDataSourceCondition = (groupId: string, conditionId: string, patch: Partial<{ mode: 'contains' | 'not_contains'; textValue: string }>) => {
+    setBiDataSourceFilterGroups(prev => prev.map(g => g.id !== groupId ? g : {
+      ...g,
+      conditions: g.conditions.map(c => c.id === conditionId ? { ...c, ...patch } : c),
+    }));
+  };
+
+  const updateBiDataSourceGroup = (groupId: string, patch: Partial<{ logic: 'and' | 'or' }>) => {
+    setBiDataSourceFilterGroups(prev => prev.map(g => g.id !== groupId ? g : { ...g, ...patch }));
+  };
+
+  const removeBiDataSourceGroup = (groupId: string) => {
+    setBiDataSourceFilterGroups(prev => prev.filter(g => g.id !== groupId));
+  };
+
+  const removeBiDataSourceCondition = (groupId: string, conditionId: string) => {
+    setBiDataSourceFilterGroups(prev => prev.map(g => {
+      if (g.id !== groupId) return g;
+      const next = g.conditions.filter(c => c.id !== conditionId);
+      return next.length === 0 ? null : { ...g, conditions: next };
+    }).filter((g): g is PivotFilterGroup => g != null));
+  };
+
   // --- 透视报告预设：保存 / 应用 / 删除 ---
   const handleSavePivotPreset = () => {
     const name = pivotPresetNameInput.trim();
@@ -3208,10 +3403,124 @@ const App = () => {
                 </div>
               )}
 
-              {/* 当前筛选条件标签 */}
-              {(biPlatformFilter !== 'all') && (
+              {/* 数据源筛选：Campaign/Ad Set/Ad，包含/不包含+文字，组内/组间且或（与透视表筛选器一致） */}
+              <div className="relative" ref={biDataSourceRef}>
                 <button
-                  onClick={() => { setBiPlatformFilter('all'); setBiGoogleTypeFilter('all'); }}
+                  onClick={() => setIsBiDataSourceOpen(!isBiDataSourceOpen)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                    biDataSourceFilterGroups.length > 0
+                      ? 'bg-amber-600/20 text-amber-300 border border-amber-500/40'
+                      : 'bg-slate-800/80 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+                  }`}
+                >
+                  <Database size={12} />
+                  数据源
+                  {biDataSourceFilterGroups.length > 0 && (
+                    <span className="bg-amber-500/30 text-amber-300 px-1.5 py-0.5 rounded text-[9px]">{biDataSourceFilterGroups.length}</span>
+                  )}
+                  <ChevronDown size={12} className={`transition-transform duration-200 ${isBiDataSourceOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {isBiDataSourceOpen && (
+                  <div className="absolute top-full left-0 mt-2 w-80 max-h-[70vh] bg-slate-900 rounded-2xl shadow-2xl border border-slate-800 p-4 z-50 animate-in fade-in zoom-in-95 duration-150 origin-top-left overflow-hidden flex flex-col">
+                    <div className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-3">Campaign 层级 · 包含/不包含+文字 · 组内/组间且或</div>
+                    {biDataSourceFilterGroups.length > 1 && (
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-[10px] text-slate-500">组间逻辑</span>
+                        <select
+                          className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white"
+                          value={biDataSourceGroupLogic}
+                          onChange={e => setBiDataSourceGroupLogic(e.target.value as 'and' | 'or')}
+                        >
+                          <option value="and">且</option>
+                          <option value="or">或</option>
+                        </select>
+                      </div>
+                    )}
+                    <select
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mb-3"
+                      onChange={e => {
+                        const v = e.currentTarget.value;
+                        if (v) handleAddBiDataSourceFilter(v);
+                        e.currentTarget.value = '';
+                      }}
+                      value=""
+                    >
+                      <option value="">添加筛选字段</option>
+                      {biDataSourceDimLabels
+                        .filter(d => !biDataSourceFilterGroups.some(g => g.fieldKey === d))
+                        .map(d => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                    </select>
+                    <div className="space-y-3 overflow-y-auto custom-scrollbar pr-1">
+                      {biDataSourceFilterGroups.map(grp => (
+                        <div key={grp.id} className="bg-slate-800/60 border border-slate-700 rounded-2xl p-3">
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <span className="text-xs font-black text-white">{grp.label}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-slate-500">组内</span>
+                              <select
+                                className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white"
+                                value={grp.logic}
+                                onChange={e => updateBiDataSourceGroup(grp.id, { logic: e.target.value as 'and' | 'or' })}
+                              >
+                                <option value="and">且</option>
+                                <option value="or">或</option>
+                              </select>
+                              <button type="button" onClick={() => addBiDataSourceCondition(grp.id)} className="text-[10px] text-indigo-400 hover:text-indigo-300">+ 添加条件</button>
+                              <button type="button" onClick={() => removeBiDataSourceGroup(grp.id)} className="text-slate-400 hover:text-red-400">
+                                <X size={14} />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="space-y-2 mt-2">
+                            {grp.conditions.map(c => (
+                              <div key={c.id} className="pl-2 border-l-2 border-slate-700 space-y-1.5">
+                                <div className="flex items-center justify-end">
+                                  <button type="button" onClick={() => removeBiDataSourceCondition(grp.id, c.id)} className="text-slate-500 hover:text-red-400 text-[10px]">删除</button>
+                                </div>
+                                <select
+                                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white"
+                                  value={c.mode === 'contains' ? 'contains' : 'not_contains'}
+                                  onChange={e => updateBiDataSourceCondition(grp.id, c.id, { mode: e.target.value as 'contains' | 'not_contains' })}
+                                >
+                                  <option value="contains">包含</option>
+                                  <option value="not_contains">不包含</option>
+                                </select>
+                                <input
+                                  type="text"
+                                  placeholder={c.mode === 'contains' ? '包含关键词' : '不包含关键词'}
+                                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white"
+                                  value={c.textValue}
+                                  onChange={e => updateBiDataSourceCondition(grp.id, c.id, { textValue: e.target.value })}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {biDataSourceFilterGroups.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setBiDataSourceFilterGroups([])}
+                        className="mt-3 w-full py-2 rounded-xl text-[10px] font-bold text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
+                      >
+                        清除全部数据源筛选
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 当前筛选条件标签 */}
+              {(biPlatformFilter !== 'all' || biDataSourceFilterGroups.length > 0) && (
+                <button
+                  onClick={() => {
+                    setBiPlatformFilter('all');
+                    setBiGoogleTypeFilter('all');
+                    setBiDataSourceFilterGroups([]);
+                  }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/60 text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition text-[10px] font-bold"
                 >
                   <X size={10} /> 清除筛选
@@ -3284,15 +3593,24 @@ const App = () => {
               </div>
               <div className="h-[450px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={aggregatedTrendData}>
+                  <AreaChart data={trendChartData}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
                     <XAxis dataKey="_date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 'bold', fill: '#94a3b8' }} dy={10} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 'bold', fill: '#64748b' }} />
                     <RechartsTooltip contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 25px 50px rgba(0,0,0,0.1)', backgroundColor: '#1e293b', color: '#e2e8f0' }} />
                     <Legend verticalAlign="top" align="left" height={36} iconType="circle" wrapperStyle={{ paddingBottom: '20px', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#e2e8f0' }} />
-                    {activeTrendMetrics.map((mKey, idx) => (
-                      <Area key={mKey} type="monotone" dataKey={mKey} name={allAvailableMetrics.find(m => m.key === mKey)?.label || mKey} stroke={getMetricColor(mKey, allAvailableMetrics.findIndex(a => a.key === mKey))} strokeWidth={activeTrendMetrics.length > 3 ? 2 : 4} fillOpacity={0.08} fill={getMetricColor(mKey, allAvailableMetrics.findIndex(a => a.key === mKey))} animationDuration={1000} />
-                    ))}
+                    {activeTrendMetrics.map((mKey, idx) => {
+                      const color = getMetricColor(mKey, allAvailableMetrics.findIndex(a => a.key === mKey));
+                      const label = allAvailableMetrics.find(m => m.key === mKey)?.label || mKey;
+                      return (
+                        <React.Fragment key={mKey}>
+                          <Area type="monotone" dataKey={mKey} name={label} stroke={color} strokeWidth={activeTrendMetrics.length > 3 ? 2 : 4} fillOpacity={0.08} fill={color} animationDuration={1000} />
+                          {includePrevPeriod && lastPeriodAggregatedTrendData.length > 0 && (
+                            <Area type="monotone" dataKey={`${mKey}_prev`} name={`${label} (上期)`} stroke={color} strokeWidth={activeTrendMetrics.length > 3 ? 1.5 : 3} strokeDasharray="6 4" fillOpacity={0.04} fill={color} animationDuration={1000} />
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
