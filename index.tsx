@@ -178,7 +178,7 @@ interface DimensionConfig {
   delimiter?: string;
 }
 
-/** 单条透视筛选器配置（用于保存到预设） */
+/** 单条透视筛选器配置（用于保存到预设，兼容旧版） */
 interface PivotFilterPreset {
   fieldKey: string;
   label: string;
@@ -188,11 +188,33 @@ interface PivotFilterPreset {
   dateRange: { start: string; end: string };
 }
 
+/** 条件组内单条子条件 */
+interface PivotFilterCondition {
+  id: string;
+  fieldKey: string;
+  mode: 'multi' | 'contains' | 'not_contains' | 'date_range';
+  selectedValues: string[];
+  textValue: string;
+  dateRange: { start: string; end: string };
+  search?: string;
+}
+
+/** 条件组：同一字段下多条子条件 + 组内且/或 */
+interface PivotFilterGroup {
+  id: string;
+  fieldKey: string;
+  label: string;
+  logic: 'and' | 'or';
+  conditions: PivotFilterCondition[];
+}
+
 /** 透视报告预设：用户保存的命名配置 */
 interface PivotPreset {
   id: string;
   name: string;
   filters: PivotFilterPreset[];
+  /** 新版条件组筛选（优先使用） */
+  filterGroups?: { groupLogic: 'and' | 'or'; groups: Array<{ fieldKey: string; label: string; logic: 'and' | 'or'; conditions: Array<Omit<PivotFilterCondition, 'id' | 'search'> & { id?: string }> }> };
   rows: string[];
   columns: string[];
   values: string[];
@@ -992,17 +1014,9 @@ const App = () => {
   const [rawDataSearch, setRawDataSearch] = useState('');
   const [rawDataPage, setRawDataPage] = useState(0);
   const [rawDataPlatformFilter, setRawDataPlatformFilter] = useState<'all' | 'facebook' | 'google'>('all');
-  // 数据透视配置
-  const [pivotFilters, setPivotFilters] = useState<Array<{
-    id: string;
-    fieldKey: string;
-    label: string;
-    mode: 'multi' | 'contains' | 'not_contains' | 'date_range';
-    selectedValues: string[];
-    search: string;
-    textValue: string;
-    dateRange: { start: string; end: string };
-  }>>(() => []);
+  // 数据透视配置（条件组 + 组内子条件，支持且/或）
+  const [pivotFilterGroupLogic, setPivotFilterGroupLogic] = useState<'and' | 'or'>('and');
+  const [pivotFilterGroups, setPivotFilterGroups] = useState<PivotFilterGroup[]>(() => []);
   const [pivotRows, setPivotRows] = useState<string[]>(() => []);
   const [pivotColumns, setPivotColumns] = useState<string[]>(() => []);
   const [pivotValues, setPivotValues] = useState<string[]>(() => ['cost']);
@@ -1954,29 +1968,37 @@ const App = () => {
     return result;
   }, [pivotPlatformScopedData, pivotDimensionFields]);
 
+  /** 单条条件对一行的匹配结果 */
+  const evalPivotCondition = (row: any, c: PivotFilterCondition): boolean => {
+    const rawVal = String(getPivotDimValue(row, c.fieldKey) || '');
+    if (c.mode === 'date_range') {
+      if (c.dateRange.start && rawVal < c.dateRange.start) return false;
+      if (c.dateRange.end && rawVal > c.dateRange.end) return false;
+      return true;
+    }
+    if (c.mode === 'multi') {
+      if (c.selectedValues.length === 0) return true;
+      return c.selectedValues.includes(rawVal);
+    }
+    if (!c.textValue) return true;
+    const needle = c.textValue.toLowerCase();
+    const hay = rawVal.toLowerCase();
+    if (c.mode === 'contains') return hay.includes(needle);
+    if (c.mode === 'not_contains') return !hay.includes(needle);
+    return true;
+  };
+
   const pivotFilteredData = useMemo(() => {
-    if (!pivotFilters.length) return pivotPlatformScopedData;
+    if (!pivotFilterGroups.length) return pivotPlatformScopedData;
     return pivotPlatformScopedData.filter(row => {
-      return pivotFilters.every(f => {
-        const rawVal = String(getPivotDimValue(row, f.fieldKey) || '');
-        if (f.mode === 'date_range') {
-          if (f.dateRange.start && rawVal < f.dateRange.start) return false;
-          if (f.dateRange.end && rawVal > f.dateRange.end) return false;
-          return true;
-        }
-        if (f.mode === 'multi') {
-          if (f.selectedValues.length === 0) return true;
-          return f.selectedValues.includes(rawVal);
-        }
-        if (!f.textValue) return true;
-        const needle = f.textValue.toLowerCase();
-        const hay = rawVal.toLowerCase();
-        if (f.mode === 'contains') return hay.includes(needle);
-        if (f.mode === 'not_contains') return !hay.includes(needle);
-        return true;
+      const groupResults = pivotFilterGroups.map(grp => {
+        if (grp.conditions.length === 0) return true;
+        const conditionResults = grp.conditions.map(c => evalPivotCondition(row, c));
+        return grp.logic === 'and' ? conditionResults.every(Boolean) : conditionResults.some(Boolean);
       });
+      return pivotFilterGroupLogic === 'and' ? groupResults.every(Boolean) : groupResults.some(Boolean);
     });
-  }, [pivotPlatformScopedData, pivotFilters]);
+  }, [pivotPlatformScopedData, pivotFilterGroups, pivotFilterGroupLogic]);
 
   const pivotResult = useMemo(() => {
     if (pivotValues.length === 0) return null;
@@ -2608,39 +2630,70 @@ const App = () => {
     }
   };
 
+  const genId = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `id_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+
+  const createEmptyCondition = (fieldKey: string, isDate: boolean): PivotFilterCondition => ({
+    id: genId(),
+    fieldKey,
+    mode: isDate ? 'date_range' : 'multi',
+    selectedValues: [],
+    textValue: '',
+    dateRange: { start: '', end: '' },
+  });
+
   const handleAddPivotFilter = (fieldKey: string) => {
     const field = pivotDimensionFields.find(f => f.key === fieldKey);
     if (!field) return;
-    setPivotFilters(prev => {
-      if (prev.some(p => p.fieldKey === fieldKey)) return prev;
+    setPivotFilterGroups(prev => {
+      if (prev.some(g => g.fieldKey === fieldKey)) return prev;
+      const isDate = field.type === 'date';
       return [
         ...prev,
         {
-          id: `${fieldKey}-${Date.now()}`,
+          id: genId(),
           fieldKey,
           label: field.label,
-          mode: field.type === 'date' ? 'date_range' : 'multi',
-          selectedValues: [],
-          search: '',
-          textValue: '',
-          dateRange: { start: '', end: '' },
+          logic: 'and' as const,
+          conditions: [createEmptyCondition(fieldKey, isDate)],
         },
       ];
     });
   };
 
-  const updatePivotFilter = (id: string, patch: Partial<{
+  const addPivotCondition = (groupId: string) => {
+    const grp = pivotFilterGroups.find(g => g.id === groupId);
+    if (!grp) return;
+    const isDate = pivotDimensionFields.find(f => f.key === grp.fieldKey)?.type === 'date';
+    setPivotFilterGroups(prev => prev.map(g => g.id !== groupId ? g : { ...g, conditions: [...g.conditions, createEmptyCondition(grp.fieldKey, isDate)] }));
+  };
+
+  const updatePivotCondition = (groupId: string, conditionId: string, patch: Partial<{
     mode: 'multi' | 'contains' | 'not_contains' | 'date_range';
     selectedValues: string[];
     search: string;
     textValue: string;
     dateRange: { start: string; end: string };
   }>) => {
-    setPivotFilters(prev => prev.map(f => (f.id === id ? { ...f, ...patch } : f)));
+    setPivotFilterGroups(prev => prev.map(g => g.id !== groupId ? g : {
+      ...g,
+      conditions: g.conditions.map(c => c.id === conditionId ? { ...c, ...patch } : c),
+    }));
   };
 
-  const removePivotFilter = (id: string) => {
-    setPivotFilters(prev => prev.filter(f => f.id !== id));
+  const updatePivotGroup = (groupId: string, patch: Partial<{ logic: 'and' | 'or' }>) => {
+    setPivotFilterGroups(prev => prev.map(g => g.id === groupId ? { ...g, ...patch } : g));
+  };
+
+  const removePivotGroup = (groupId: string) => {
+    setPivotFilterGroups(prev => prev.filter(g => g.id !== groupId));
+  };
+
+  const removePivotCondition = (groupId: string, conditionId: string) => {
+    setPivotFilterGroups(prev => prev.map(g => {
+      if (g.id !== groupId) return g;
+      const next = g.conditions.filter(c => c.id !== conditionId);
+      return next.length === 0 ? null : { ...g, conditions: next };
+    }).filter((g): g is PivotFilterGroup => g != null));
   };
 
   // --- 透视报告预设：保存 / 应用 / 删除 ---
@@ -2648,17 +2701,28 @@ const App = () => {
     const name = pivotPresetNameInput.trim();
     if (!name) return;
     if (currentUser) trackSavePivotPreset(currentUser.username, name);
+    const filterGroupsPayload = {
+      groupLogic: pivotFilterGroupLogic,
+      groups: pivotFilterGroups.map(g => ({
+        fieldKey: g.fieldKey,
+        label: g.label,
+        logic: g.logic,
+        conditions: g.conditions.map(({ id, search, ...rest }) => rest),
+      })),
+    };
+    const legacyFilters: PivotFilterPreset[] = pivotFilterGroups.flatMap(g => g.conditions.map(c => ({
+      fieldKey: g.fieldKey,
+      label: g.label,
+      mode: c.mode,
+      selectedValues: c.selectedValues,
+      textValue: c.textValue,
+      dateRange: c.dateRange,
+    })));
     const preset: PivotPreset = {
       id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `preset_${Date.now()}`,
       name,
-      filters: pivotFilters.map(f => ({
-        fieldKey: f.fieldKey,
-        label: f.label,
-        mode: f.mode,
-        selectedValues: f.selectedValues,
-        textValue: f.textValue,
-        dateRange: f.dateRange,
-      })),
+      filters: legacyFilters,
+      filterGroups: filterGroupsPayload,
       rows: [...pivotRows],
       columns: [...pivotColumns],
       values: [...pivotValues],
@@ -2680,19 +2744,51 @@ const App = () => {
     const validDimKeys = new Set(pivotDimensionFields.map(f => f.key));
     const validValueKeys = new Set(allAvailableMetrics.map(m => m.key));
     const validPlatformScopes = new Set(PIVOT_PLATFORM_OPTIONS.map(p => p.key));
-    const safeFilters = preset.filters.filter(f => validDimKeys.has(f.fieldKey));
-    setPivotFilters(
-      safeFilters.map(f => ({
-        id: `${f.fieldKey}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        fieldKey: f.fieldKey,
-        label: f.label,
-        mode: f.mode,
-        selectedValues: f.selectedValues,
-        search: '',
-        textValue: f.textValue,
-        dateRange: f.dateRange,
-      }))
-    );
+    if (preset.filterGroups && preset.filterGroups.groups.length > 0) {
+      setPivotFilterGroupLogic(preset.filterGroups.groupLogic);
+      setPivotFilterGroups(
+        preset.filterGroups.groups
+          .filter(g => validDimKeys.has(g.fieldKey))
+          .map(g => ({
+            id: genId(),
+            fieldKey: g.fieldKey,
+            label: g.label,
+            logic: g.logic,
+            conditions: g.conditions.map(c => ({
+              ...c,
+              id: genId(),
+              search: '',
+            })),
+          }))
+      );
+    } else {
+      const safeFilters = (preset.filters || []).filter(f => validDimKeys.has(f.fieldKey));
+      setPivotFilterGroupLogic('and');
+      const groupByField = new Map<string, PivotFilterPreset[]>();
+      safeFilters.forEach(f => {
+        if (!groupByField.has(f.fieldKey)) groupByField.set(f.fieldKey, []);
+        groupByField.get(f.fieldKey)!.push(f);
+      });
+      setPivotFilterGroups(
+        Array.from(groupByField.entries()).map(([fieldKey, list]) => {
+          const first = list[0]!;
+          return {
+            id: genId(),
+            fieldKey,
+            label: first.label,
+            logic: 'and' as const,
+            conditions: list.map(f => ({
+              id: genId(),
+              fieldKey: f.fieldKey,
+              mode: f.mode,
+              selectedValues: f.selectedValues,
+              textValue: f.textValue,
+              dateRange: f.dateRange,
+            })),
+          };
+        })
+      );
+    }
     const restoredSegment = preset.segmentMode || 'default';
     setPivotSegmentMode(restoredSegment);
     const allowedBySegment = SEGMENT_ALLOWED_PLATFORMS[restoredSegment] || DEFAULT_PIVOT_PLATFORM_SCOPES;
@@ -2722,17 +2818,28 @@ const App = () => {
     e?.stopPropagation?.();
     const preset = pivotPresets.find(p => p.id === id);
     if (!preset) return;
+    const filterGroupsPayload = {
+      groupLogic: pivotFilterGroupLogic,
+      groups: pivotFilterGroups.map(g => ({
+        fieldKey: g.fieldKey,
+        label: g.label,
+        logic: g.logic,
+        conditions: g.conditions.map(({ id, search, ...rest }) => rest),
+      })),
+    };
+    const legacyFilters: PivotFilterPreset[] = pivotFilterGroups.flatMap(g => g.conditions.map(c => ({
+      fieldKey: g.fieldKey,
+      label: g.label,
+      mode: c.mode,
+      selectedValues: c.selectedValues,
+      textValue: c.textValue,
+      dateRange: c.dateRange,
+    })));
     const updated: PivotPreset = {
       id: preset.id,
       name: preset.name,
-      filters: pivotFilters.map(f => ({
-        fieldKey: f.fieldKey,
-        label: f.label,
-        mode: f.mode,
-        selectedValues: f.selectedValues,
-        textValue: f.textValue,
-        dateRange: f.dateRange,
-      })),
+      filters: legacyFilters,
+      filterGroups: filterGroupsPayload,
       rows: [...pivotRows],
       columns: [...pivotColumns],
       values: [...pivotValues],
@@ -3454,6 +3561,19 @@ const App = () => {
 
                   <div>
                     <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">筛选器</div>
+                    {pivotFilterGroups.length > 1 && (
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-[10px] text-slate-500">组间逻辑</span>
+                        <select
+                          className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white"
+                          value={pivotFilterGroupLogic}
+                          onChange={e => setPivotFilterGroupLogic(e.target.value as 'and' | 'or')}
+                        >
+                          <option value="and">且</option>
+                          <option value="or">或</option>
+                        </select>
+                      </div>
+                    )}
                     <select
                       className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mb-3"
                       onChange={e => {
@@ -3464,78 +3584,102 @@ const App = () => {
                     >
                       <option value="">添加筛选字段</option>
                       {pivotDimensionFields
-                        .filter(f => !pivotFilters.some(p => p.fieldKey === f.key))
+                        .filter(f => !pivotFilterGroups.some(g => g.fieldKey === f.key))
                         .map(f => (
                           <option key={f.key} value={f.key}>{f.label}</option>
                         ))}
                     </select>
                     <div className="space-y-3">
-                      {pivotFilters.map(f => {
-                        const field = pivotDimensionFields.find(df => df.key === f.fieldKey);
+                      {pivotFilterGroups.map(grp => {
+                        const field = pivotDimensionFields.find(df => df.key === grp.fieldKey);
                         const isDate = field?.type === 'date';
-                        const options = pivotDimensionValueOptions[f.fieldKey] || [];
-                        const filteredOptions = options.filter(v => v.toLowerCase().includes((f.search || '').toLowerCase()));
                         return (
-                          <div key={f.id} className="bg-slate-800/60 border border-slate-700 rounded-2xl p-3">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-black text-white">{f.label}</span>
-                              <button onClick={() => removePivotFilter(f.id)} className="text-slate-400 hover:text-red-400">
-                                <X size={14} />
-                              </button>
+                          <div key={grp.id} className="bg-slate-800/60 border border-slate-700 rounded-2xl p-3">
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                              <span className="text-xs font-black text-white">{grp.label}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-slate-500">组内</span>
+                                <select
+                                  className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white"
+                                  value={grp.logic}
+                                  onChange={e => updatePivotGroup(grp.id, { logic: e.target.value as 'and' | 'or' })}
+                                >
+                                  <option value="and">且</option>
+                                  <option value="or">或</option>
+                                </select>
+                                <button type="button" onClick={() => addPivotCondition(grp.id)} className="text-[10px] text-indigo-400 hover:text-indigo-300">+ 添加条件</button>
+                                <button onClick={() => removePivotGroup(grp.id)} className="text-slate-400 hover:text-red-400">
+                                  <X size={14} />
+                                </button>
+                              </div>
                             </div>
-                            {!isDate && (
-                              <select
-                                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white mt-2"
-                                value={f.mode}
-                                onChange={e => updatePivotFilter(f.id, { mode: e.target.value as any, selectedValues: [] })}
-                              >
-                                <option value="multi">多选</option>
-                                <option value="contains">包含</option>
-                                <option value="not_contains">不包含</option>
-                              </select>
-                            )}
-                            {isDate ? (
-                              <div className="grid grid-cols-2 gap-2 mt-2">
-                                <input type="date" className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white" value={f.dateRange.start} onChange={e => updatePivotFilter(f.id, { dateRange: { ...f.dateRange, start: e.target.value } })} />
-                                <input type="date" className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white" value={f.dateRange.end} onChange={e => updatePivotFilter(f.id, { dateRange: { ...f.dateRange, end: e.target.value } })} />
-                              </div>
-                            ) : f.mode === 'multi' ? (
-                              <div className="mt-2">
-                                <input
-                                  type="text"
-                                  placeholder="搜索..."
-                                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white mb-2"
-                                  value={f.search}
-                                  onChange={e => updatePivotFilter(f.id, { search: e.target.value })}
-                                />
-                                <div className="max-h-40 overflow-y-auto custom-scrollbar pr-1 space-y-1">
-                                  {filteredOptions.map(v => {
-                                    const active = f.selectedValues.includes(v);
-                                    return (
-                                      <button
-                                        key={v}
-                                        onClick={() => {
-                                          const next = active ? f.selectedValues.filter(x => x !== v) : [...f.selectedValues, v];
-                                          updatePivotFilter(f.id, { selectedValues: next });
-                                        }}
-                                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left ${active ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+                            <div className="space-y-2 mt-2">
+                              {grp.conditions.map(c => {
+                                const options = pivotDimensionValueOptions[c.fieldKey] || [];
+                                const filteredOptions = options.filter(v => v.toLowerCase().includes((c.search || '').toLowerCase()));
+                                return (
+                                  <div key={c.id} className="pl-2 border-l-2 border-slate-700 space-y-1.5">
+                                    <div className="flex items-center justify-end">
+                                      <button onClick={() => removePivotCondition(grp.id, c.id)} className="text-slate-500 hover:text-red-400 text-[10px]">删除</button>
+                                    </div>
+                                    {!isDate && (
+                                      <select
+                                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white"
+                                        value={c.mode}
+                                        onChange={e => updatePivotCondition(grp.id, c.id, { mode: e.target.value as any, selectedValues: [] })}
                                       >
-                                        <div className={`w-3 h-3 rounded border ${active ? 'bg-white border-white' : 'border-slate-500'}`} />
-                                        <span className="text-[11px] truncate">{v}</span>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            ) : (
-                              <input
-                                type="text"
-                                placeholder={f.mode === 'contains' ? '包含关键词' : '不包含关键词'}
-                                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white mt-2"
-                                value={f.textValue}
-                                onChange={e => updatePivotFilter(f.id, { textValue: e.target.value })}
-                              />
-                            )}
+                                        <option value="multi">多选</option>
+                                        <option value="contains">包含</option>
+                                        <option value="not_contains">不包含</option>
+                                      </select>
+                                    )}
+                                    {isDate ? (
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <input type="date" className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white" value={c.dateRange.start} onChange={e => updatePivotCondition(grp.id, c.id, { dateRange: { ...c.dateRange, start: e.target.value } })} />
+                                        <input type="date" className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white" value={c.dateRange.end} onChange={e => updatePivotCondition(grp.id, c.id, { dateRange: { ...c.dateRange, end: e.target.value } })} />
+                                      </div>
+                                    ) : c.mode === 'multi' ? (
+                                      <>
+                                        <input
+                                          type="text"
+                                          placeholder="搜索..."
+                                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white"
+                                          value={c.search || ''}
+                                          onChange={e => updatePivotCondition(grp.id, c.id, { search: e.target.value })}
+                                        />
+                                        <div className="max-h-32 overflow-y-auto custom-scrollbar pr-1 space-y-1">
+                                          {filteredOptions.map(v => {
+                                            const active = c.selectedValues.includes(v);
+                                            return (
+                                              <button
+                                                key={v}
+                                                type="button"
+                                                onClick={() => {
+                                                  const next = active ? c.selectedValues.filter(x => x !== v) : [...c.selectedValues, v];
+                                                  updatePivotCondition(grp.id, c.id, { selectedValues: next });
+                                                }}
+                                                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left ${active ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+                                              >
+                                                <div className={`w-3 h-3 rounded border ${active ? 'bg-white border-white' : 'border-slate-500'}`} />
+                                                <span className="text-[11px] truncate">{v}</span>
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      </>
+                                    ) : (
+                                      <input
+                                        type="text"
+                                        placeholder={c.mode === 'contains' ? '包含关键词' : '不包含关键词'}
+                                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white"
+                                        value={c.textValue}
+                                        onChange={e => updatePivotCondition(grp.id, c.id, { textValue: e.target.value })}
+                                      />
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         );
                       })}
