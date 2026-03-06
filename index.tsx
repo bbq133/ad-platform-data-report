@@ -3834,7 +3834,7 @@ const App = () => {
                               <tr key={row.key + idx} className={`border border-transparent ${isGrand ? 'bg-indigo-900/20' : isSubtotal ? 'bg-slate-800/60' : 'bg-slate-800/40'} rounded-3xl`}>
                                 {(pivotResult.rowDims.length ? pivotResult.rowDims : ['维度']).map((_, i) => (
                                   <td key={i} className={`px-4 py-3 text-xs font-black ${isGrand ? 'text-indigo-300' : isSubtotal ? 'text-slate-200' : 'text-white'} sticky left-0 bg-inherit z-10`}>
-                                    {(!displayCells[i] || displayCells[i] === 'N/A' || displayCells[i].toUpperCase() === 'NULL') ? '—' : displayCells[i]}
+                                    {(!displayCells[i] || displayCells[i] === 'N/A' || displayCells[i].toUpperCase() === 'NULL') ? '' : displayCells[i]}
                                   </td>
                                 ))}
                                 {pivotResult.colKeys.map(colKey => (
