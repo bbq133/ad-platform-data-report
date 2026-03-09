@@ -3,7 +3,7 @@
  * 负责数据获取和格式转换
  */
 
-import { API_CONFIG, GOOGLE_SHEETS_CONFIG, ApiRequestParams, ApiDataRow, ApiResponse, ProjectOption, ProjectListResponse } from './api-config';
+import { API_CONFIG, GOOGLE_SHEETS_CONFIG, FEISHU_GAS_CONFIG, ApiRequestParams, ApiDataRow, ApiResponse, ProjectOption, ProjectListResponse } from './api-config';
 
 /**
  * 从 API 获取广告数据
@@ -293,7 +293,7 @@ export function extractUniqueAccounts(data: ApiDataRow[]): { id: string; name: s
 /**
  * 获取用户配置 (Metrics Mapping 或 Dimension Configs)
  */
-export type UserConfigType = 'metrics' | 'dimensions' | 'formulas' | 'pivotPresets' | 'bi' | 'scheduledReports';
+export type UserConfigType = 'metrics' | 'dimensions' | 'formulas' | 'pivotPresets' | 'bi' | 'scheduledReports' | 'dataAlerts';
 
 export async function fetchUserConfig(
     username: string,
@@ -476,7 +476,181 @@ export async function testSendScheduledReport(
         // #endregion
 
         console.error('Failed to test send scheduled report:', e);
-        // 抛出错误给调用方，在 UI 中展示
         throw e;
     }
+}
+
+// ==================== 飞书定时报表 API ====================
+
+export interface FeishuDepartment {
+    open_department_id: string;
+    name: string;
+    parent_department_id: string;
+    member_count: number;
+}
+
+export interface FeishuUser {
+    open_id: string;
+    user_id: string;
+    name: string;
+    email: string;
+    mobile: string;
+    department_ids: string[];
+    avatar_url: string;
+}
+
+export interface FeishuScheduledReportTaskPayload {
+    id?: string;
+    active: boolean;
+    name: string;
+    frequency: 'daily' | 'weekly';
+    timeOfDay: string;
+    weekDay?: number;
+    dateRangePreset: 'last3' | 'last7' | 'last15' | 'last30' | 'custom';
+    customDateStart?: string;
+    customDateEnd?: string;
+    pivotPresetIds: string[];
+    feishuRecipientType: 'users';
+    feishuUserIds: string[];
+    feishuSpreadsheetToken?: string;
+}
+
+export async function fetchFeishuDepartments(parentDepartmentId = '0'): Promise<FeishuDepartment[]> {
+    const url = `${FEISHU_GAS_CONFIG.GAS_API_URL}?action=feishuDepartments&parentDepartmentId=${encodeURIComponent(parentDepartmentId)}`;
+    try {
+        const response = await fetch(url);
+        const result = await response.json();
+        if (result.status === 'success') return result.data || [];
+        console.error('fetchFeishuDepartments error:', result.message);
+        return [];
+    } catch (e) {
+        console.error('fetchFeishuDepartments failed:', e);
+        return [];
+    }
+}
+
+export async function fetchFeishuUsers(departmentId = '0'): Promise<FeishuUser[]> {
+    const url = `${FEISHU_GAS_CONFIG.GAS_API_URL}?action=feishuUsers&departmentId=${encodeURIComponent(departmentId)}`;
+    try {
+        const response = await fetch(url);
+        const result = await response.json();
+        if (result.status === 'success') return result.data || [];
+        console.error('fetchFeishuUsers error:', result.message);
+        return [];
+    } catch (e) {
+        console.error('fetchFeishuUsers failed:', e);
+        return [];
+    }
+}
+
+/** 按 open_id 批量获取飞书用户信息（用于编辑规则时展示收件人姓名） */
+export async function fetchFeishuUsersByIds(openIds: string[]): Promise<FeishuUser[]> {
+    if (!openIds.length) return [];
+    const url = `${FEISHU_GAS_CONFIG.GAS_API_URL}?action=feishuUsersByIds&openIds=${encodeURIComponent(openIds.join(','))}`;
+    try {
+        const response = await fetch(url);
+        const result = await response.json();
+        if (result.status === 'success') return result.data || [];
+        return [];
+    } catch (e) {
+        console.error('fetchFeishuUsersByIds failed:', e);
+        return [];
+    }
+}
+
+export async function fetchFeishuUserConfig(
+    username: string,
+    projectId: string | number,
+    type: string
+): Promise<any> {
+    const url = `${FEISHU_GAS_CONFIG.GAS_API_URL}?action=getConfig&user=${encodeURIComponent(username)}&projectId=${encodeURIComponent(String(projectId))}&type=${encodeURIComponent(type)}`;
+    try {
+        const response = await fetch(url);
+        const result = await response.json();
+        return result.status === 'success' ? result.data : null;
+    } catch (e) {
+        console.error('fetchFeishuUserConfig failed:', e);
+        return null;
+    }
+}
+
+export async function saveFeishuUserConfig(
+    username: string,
+    projectId: string | number,
+    type: string,
+    data: any
+): Promise<boolean> {
+    try {
+        const response = await fetch(FEISHU_GAS_CONFIG.GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'saveConfig', user: username, projectId, type, data })
+        });
+        const result = await response.json();
+        return result.status === 'success';
+    } catch (e) {
+        console.error('saveFeishuUserConfig failed:', e);
+        return false;
+    }
+}
+
+export async function testFeishuScheduledReport(
+    username: string,
+    projectId: string | number,
+    task: FeishuScheduledReportTaskPayload
+): Promise<void> {
+    const response = await fetch(FEISHU_GAS_CONFIG.GAS_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'testFeishuScheduledReport', user: username, projectId, task })
+    });
+
+    let result: any = null;
+    try { result = await response.json(); } catch { result = null; }
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!result || result.status !== 'success') {
+        throw new Error((result && result.message) || '飞书测试发送失败');
+    }
+}
+
+// ==================== 广告预警监控 API ====================
+
+export interface AlertRulePayload {
+    id: string;
+    active: boolean;
+    name: string;
+    platform: 'facebook' | 'google';
+    dimension: 'campaign' | 'adset' | 'ad';
+    metric: string;
+    triggerDirection: 'above' | 'below';
+    triggerValue: number;
+    lookbackDays: number;
+    checkTime: string;
+    feishuUserIds: string[];
+    filterRules: { field: string; operator: string; value: string }[];
+    filterLogic: 'AND' | 'OR';
+    lastTriggeredAt?: string;
+    createdAt: string;
+}
+
+export async function testAlertRule(
+    username: string,
+    projectId: string | number,
+    rule: AlertRulePayload
+): Promise<{ triggered: boolean; matchedItems?: { name: string; value: number }[] }> {
+    const response = await fetch(FEISHU_GAS_CONFIG.GAS_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'testDataAlert', user: username, projectId, rule })
+    });
+
+    let result: any = null;
+    try { result = await response.json(); } catch { result = null; }
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!result || result.status !== 'success') {
+        throw new Error((result && result.message) || '预警测试失败');
+    }
+    return result.data || { triggered: false };
 }

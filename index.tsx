@@ -70,9 +70,10 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { AI_CONFIG, generateAnalysisPrompt, cleanAiResponseText } from './ai-config';
 import { API_CONFIG, getDefaultDateRange, ProjectOption } from './api-config';
-import { fetchAllPlatformsData, transformApiDataToRawData, fetchProjectList, extractUniqueAccounts, fetchUserConfig, saveUserConfig } from './api-service';
+import { fetchAllPlatformsData, transformApiDataToRawData, fetchProjectList, extractUniqueAccounts, fetchUserConfig, saveUserConfig, fetchFeishuUserConfig } from './api-service';
 import LoginPage from './LoginPage';
-import ScheduledReportsPanel, { type ScheduledReportTask, type ScheduledReportLog } from './ScheduledReportsPanel';
+import ScheduledReportsPanel, { type ScheduledReportTask, type ScheduledReportLog, type FeishuScheduledReportTask } from './ScheduledReportsPanel';
+import AlertMonitorPanel, { type AlertRule, type AlertLog } from './AlertMonitorPanel';
 import { getUserSession, saveUserSession, clearUserSession, filterProjectsByKeywords, UserInfo, fetchSystemConfig, saveSystemConfig, getSystemConfig } from './auth-service';
 import { initTracking, trackLogin, trackProjectSelect, trackFetchData, trackExportData, trackSaveConfig, trackSavePivotPreset, trackAiAnalysis } from './tracking-service';
 
@@ -693,7 +694,7 @@ const App = () => {
   };
 
   // --- State for App ---
-  const [projectMainTab, setProjectMainTab] = useState<'analysis' | 'scheduled'>('analysis');
+  const [projectMainTab, setProjectMainTab] = useState<'analysis' | 'scheduled' | 'alerts'>('analysis');
   const [step, setStep] = useState<'upload' | 'mapping' | 'dashboard' | 'dataSourceConfig'>('upload');
   const [mappingTab, setMappingTab] = useState<'metrics' | 'dimensions' | 'quality'>('metrics');
   const [rawData, setRawData] = useState<RawDataRow[]>([]);
@@ -1057,6 +1058,14 @@ const App = () => {
   const [scheduledReportTasks, setScheduledReportTasks] = useState<ScheduledReportTask[]>([]);
   const [scheduledReportLogs, setScheduledReportLogs] = useState<ScheduledReportLog[]>([]);
   const [isLoadingScheduledReports, setIsLoadingScheduledReports] = useState(false);
+  // 飞书定时报表
+  const [feishuScheduledReportTasks, setFeishuScheduledReportTasks] = useState<FeishuScheduledReportTask[]>([]);
+  const [feishuScheduledReportLogs, setFeishuScheduledReportLogs] = useState<ScheduledReportLog[]>([]);
+  const [isLoadingFeishuReports, setIsLoadingFeishuReports] = useState(false);
+  // 广告预警监控
+  const [alertRules, setAlertRules] = useState<AlertRule[]>([]);
+  const [alertLogs, setAlertLogs] = useState<AlertLog[]>([]);
+  const [isLoadingAlerts, setIsLoadingAlerts] = useState(false);
 
   // 切换平台/Google 类型时自动重置 segment 到默认值
   useEffect(() => {
@@ -1339,6 +1348,42 @@ const App = () => {
       const parsed = typeof data === 'string' ? JSON.parse(data) : data;
       setScheduledReportTasks(parsed.tasks ?? []);
       setScheduledReportLogs(parsed.logs ?? []);
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [currentUser?.username, selectedProject?.projectId]);
+
+  // --- 飞书定时报表任务加载 ---
+  useEffect(() => {
+    if (!currentUser?.username || !selectedProject?.projectId) return;
+    let cancelled = false;
+    setIsLoadingFeishuReports(true);
+    const load = async () => {
+      const data = await fetchFeishuUserConfig(currentUser.username, selectedProject.projectId, 'feishuScheduledReports');
+      if (cancelled) return;
+      setIsLoadingFeishuReports(false);
+      if (data == null) return;
+      const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+      setFeishuScheduledReportTasks(parsed.tasks ?? []);
+      setFeishuScheduledReportLogs(parsed.logs ?? []);
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [currentUser?.username, selectedProject?.projectId]);
+
+  // --- 广告预警监控配置加载 ---
+  useEffect(() => {
+    if (!currentUser?.username || !selectedProject?.projectId) return;
+    let cancelled = false;
+    setIsLoadingAlerts(true);
+    const load = async () => {
+      const data = await fetchFeishuUserConfig(currentUser.username, selectedProject.projectId, 'dataAlerts');
+      if (cancelled) return;
+      setIsLoadingAlerts(false);
+      if (data == null) return;
+      const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+      setAlertRules(parsed.rules ?? []);
+      setAlertLogs(parsed.logs ?? []);
     };
     load();
     return () => { cancelled = true; };
@@ -4410,6 +4455,7 @@ const App = () => {
                   {[
                     { id: 'analysis' as const, label: '数据分析', icon: BarChart3 },
                     { id: 'scheduled' as const, label: '报告定时任务', icon: Clock },
+                    { id: 'alerts' as const, label: '广告预警监控', icon: AlertTriangle },
                   ].map(({ id, label, icon: Icon }) => (
                     <button
                       key={id}
@@ -5553,7 +5599,26 @@ const App = () => {
                 setTasks={setScheduledReportTasks}
                 logs={scheduledReportLogs}
                 setLogs={setScheduledReportLogs}
+                feishuTasks={feishuScheduledReportTasks}
+                setFeishuTasks={setFeishuScheduledReportTasks}
+                feishuLogs={feishuScheduledReportLogs}
+                setFeishuLogs={setFeishuScheduledReportLogs}
                 isLoadingScheduledReports={isLoadingScheduledReports}
+                isLoadingFeishuReports={isLoadingFeishuReports}
+              />
+            )}
+
+            {/* --- 广告预警监控面板 --- */}
+            {projectMainTab === 'alerts' && currentUser && selectedProject && (
+              <AlertMonitorPanel
+                currentUser={currentUser}
+                selectedProject={selectedProject}
+                formulas={formulas.map(f => ({ id: f.id, name: f.name, formula: f.formula, unit: f.unit }))}
+                rules={alertRules}
+                setRules={setAlertRules}
+                logs={alertLogs}
+                setLogs={setAlertLogs}
+                isLoading={isLoadingAlerts}
               />
             )}
           </div>

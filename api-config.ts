@@ -30,6 +30,11 @@ export const GOOGLE_SHEETS_CONFIG = {
     }
 };
 
+// 飞书定时报表 - 独立 GAS Web App
+export const FEISHU_GAS_CONFIG = {
+    GAS_API_URL: 'https://script.google.com/macros/s/AKfycbyosrtLO-oPc7sonrh_7E3Qog5Ky5fGvsZQkni142Wcc2sFWrEeSGbijR8_FxTI5no_1A/exec',
+};
+
 // 项目信息类型
 export interface ProjectOption {
     projectId: number;
@@ -170,13 +175,13 @@ export interface ApiResponse {
     data: ApiDataRow[];
 }
 
-// 获取默认日期范围 (最近15天)
+// 获取默认日期范围（首次进入系统为最近 7 天）
 export function getDefaultDateRange(): { start: string; end: string } {
     const today = new Date();
     const endDate = today.toISOString().split('T')[0];
 
     const startDateObj = new Date(today);
-    startDateObj.setDate(startDateObj.getDate() - 14); // 最近15天
+    startDateObj.setDate(startDateObj.getDate() - 6); // 最近 7 天（含今天）
     const startDate = startDateObj.toISOString().split('T')[0];
 
     return { start: startDate, end: endDate };
