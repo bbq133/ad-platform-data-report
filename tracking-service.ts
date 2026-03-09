@@ -101,3 +101,25 @@ export function trackScheduledTaskToggle(username: string, taskName: string, act
 export function trackScheduledTaskSend(username: string, taskName: string, status: 'SUCCESS' | 'FAIL'): void {
   track('scheduled_send', `scheduled_send_${status.toLowerCase()}: ${taskName}`, username);
 }
+
+// ---- 预警规则埋点 ----
+
+export function trackAlertRuleCreate(username: string, ruleName: string): void {
+  track('click', `click_create_alert_rule: ${ruleName}`, username);
+}
+
+export function trackAlertRuleEdit(username: string, ruleName: string): void {
+  track('click', `click_edit_alert_rule: ${ruleName}`, username);
+}
+
+export function trackAlertRuleDelete(username: string, ruleName: string): void {
+  track('click', `click_delete_alert_rule: ${ruleName}`, username);
+}
+
+export function trackAlertRuleToggle(username: string, ruleName: string, active: boolean): void {
+  track('click', `click_${active ? 'enable' : 'pause'}_alert_rule: ${ruleName}`, username);
+}
+
+export function trackAlertRuleTest(username: string, ruleName: string, triggered: boolean): void {
+  track('alert_test', `alert_test_${triggered ? 'triggered' : 'not_triggered'}: ${ruleName}`, username);
+}

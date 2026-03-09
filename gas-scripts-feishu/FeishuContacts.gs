@@ -138,6 +138,28 @@ function getFeishuUsersByDepartment(departmentId) {
 }
 
 /**
+ * 获取根部门下全部用户（含所有子部门），用于前端收件人筛选框一次性加载
+ * 递归收集部门 ID 后逐部门拉取用户，按 open_id 去重
+ * @return {Array} 用户列表 [{ open_id, name, email, department_ids, ... }]
+ */
+function getFeishuAllUsersUnderRoot() {
+  var deptIds = collectDepartmentIdsRecursive('0', 5, 200);
+  var seen = {};
+  var users = [];
+  for (var d = 0; d < deptIds.length; d++) {
+    var list = getFeishuUsersByDepartment(deptIds[d]);
+    for (var u = 0; u < list.length; u++) {
+      var uid = list[u].open_id;
+      if (uid && !seen[uid]) {
+        seen[uid] = true;
+        users.push(list[u]);
+      }
+    }
+  }
+  return users;
+}
+
+/**
  * 根据 open_id 列表批量获取用户信息（含邮箱）
  * 优先使用批量接口 GET /contact/v3/users/batch；若返回 0 人则按 open_id 逐个用 find_by_department 的部门反查（先根部门 0）匹配用户取邮箱
  * @param {string[]} openIds open_id 数组

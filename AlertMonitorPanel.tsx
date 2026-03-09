@@ -22,12 +22,13 @@ import {
   TrendingDown,
 } from 'lucide-react';
 import {
-  fetchFeishuDepartments, fetchFeishuUsers, fetchFeishuUsersByIds,
+  fetchFeishuDepartments, fetchFeishuUsers, fetchFeishuAllUsers, fetchFeishuUsersByIds,
   saveFeishuUserConfig, testAlertRule,
   type FeishuDepartment, type FeishuUser, type AlertRulePayload,
 } from './api-service';
 import type { ProjectOption } from './api-config';
 import type { UserInfo } from './auth-service';
+import { trackAlertRuleCreate, trackAlertRuleEdit, trackAlertRuleDelete, trackAlertRuleToggle, trackAlertRuleTest } from './tracking-service';
 
 // --- Types ---
 
@@ -180,6 +181,7 @@ const AlertMonitorPanel: React.FC<Props> = ({
   const [formFeishuUserIds, setFormFeishuUserIds] = useState<string[]>([]);
   const [feishuSubDepts, setFeishuSubDepts] = useState<FeishuDepartment[]>([]);
   const [feishuUsers, setFeishuUsers] = useState<FeishuUser[]>([]);
+  const [feishuAllUsers, setFeishuAllUsers] = useState<FeishuUser[]>([]);
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
   const [feishuUserSearch, setFeishuUserSearch] = useState('');
   const [deptBreadcrumb, setDeptBreadcrumb] = useState<{ id: string; name: string }[]>([{ id: '0', name: '全公司' }]);
@@ -224,6 +226,7 @@ const AlertMonitorPanel: React.FC<Props> = ({
     if (isFormOpen) {
       setDeptBreadcrumb([{ id: '0', name: '全公司' }]);
       loadDeptContents('0');
+      fetchFeishuAllUsers().then(setFeishuAllUsers);
     }
   }, [isFormOpen]);
 
@@ -337,8 +340,10 @@ const AlertMonitorPanel: React.FC<Props> = ({
 
     let updated: AlertRule[];
     if (editingRule) {
+      trackAlertRuleEdit(currentUser.username, ruleData.name);
       updated = rules.map(r => r.id === editingRule.id ? ruleData : r);
     } else {
+      trackAlertRuleCreate(currentUser.username, ruleData.name);
       updated = [...rules, ruleData];
     }
 
@@ -348,11 +353,15 @@ const AlertMonitorPanel: React.FC<Props> = ({
   };
 
   const handleDeleteRule = async (ruleId: string) => {
+    const rule = rules.find(r => r.id === ruleId);
+    if (rule) trackAlertRuleDelete(currentUser.username, rule.name);
     const updated = rules.filter(r => r.id !== ruleId);
     await saveRules(updated);
   };
 
   const handleToggleActive = async (ruleId: string) => {
+    const rule = rules.find(r => r.id === ruleId);
+    if (rule) trackAlertRuleToggle(currentUser.username, rule.name, !rule.active);
     const updated = rules.map(r => r.id === ruleId ? { ...r, active: !r.active } : r);
     await saveRules(updated);
   };
@@ -380,6 +389,7 @@ const AlertMonitorPanel: React.FC<Props> = ({
         createdAt: new Date().toISOString(),
       };
       const result = await testAlertRule(currentUser.username, selectedProject.projectId, payload);
+      trackAlertRuleTest(currentUser.username, formName.trim(), !!result.triggered);
       if (result.triggered) {
         const count = result.matchedItems?.length || 0;
         setTestMessage({ type: 'success', text: `预警触发！共 ${count} 项匹配，飞书消息已发送` });
@@ -413,14 +423,20 @@ const AlertMonitorPanel: React.FC<Props> = ({
     );
   };
 
+  const currentDeptId = deptBreadcrumb[deptBreadcrumb.length - 1]?.id ?? '0';
+  const feishuListSource = feishuAllUsers.length > 0 ? feishuAllUsers : feishuUsers;
   const filteredFeishuUsers = useMemo(() => {
-    if (!feishuUserSearch.trim()) return feishuUsers;
+    let list = feishuListSource;
+    if (currentDeptId !== '0') {
+      list = list.filter(u => u.department_ids && u.department_ids.includes(currentDeptId));
+    }
+    if (!feishuUserSearch.trim()) return list;
     const q = feishuUserSearch.toLowerCase();
-    return feishuUsers.filter(u =>
+    return list.filter(u =>
       (u.name || '').toLowerCase().includes(q) ||
       (u.email || '').toLowerCase().includes(q)
     );
-  }, [feishuUsers, feishuUserSearch]);
+  }, [feishuListSource, currentDeptId, feishuUserSearch]);
 
   const getDimensionLabel = (d: string) => DIMENSION_OPTIONS.find(o => o.value === d)?.label ?? d;
   const getPlatformLabel = (p: string) => PLATFORM_OPTIONS.find(o => o.value === p)?.label ?? p;

@@ -543,6 +543,21 @@ export async function fetchFeishuUsers(departmentId = '0'): Promise<FeishuUser[]
     }
 }
 
+/** 全公司用户（含子部门），用于收件人筛选框一次性加载；后端 10 分钟缓存 */
+export async function fetchFeishuAllUsers(): Promise<FeishuUser[]> {
+    const url = `${FEISHU_GAS_CONFIG.GAS_API_URL}?action=feishuAllUsers`;
+    try {
+        const response = await fetch(url);
+        const result = await response.json();
+        if (result.status === 'success') return result.data || [];
+        console.error('fetchFeishuAllUsers error:', result.message);
+        return [];
+    } catch (e) {
+        console.error('fetchFeishuAllUsers failed:', e);
+        return [];
+    }
+}
+
 /** 按 open_id 批量获取飞书用户信息（用于编辑规则时展示收件人姓名） */
 export async function fetchFeishuUsersByIds(openIds: string[]): Promise<FeishuUser[]> {
     if (!openIds.length) return [];

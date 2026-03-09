@@ -9,6 +9,7 @@
  *     - getConfig            读取 UserConfigs（与原有一致）
  *     - feishuDepartments    获取飞书部门列表（供前端选人）
  *     - feishuUsers          获取指定部门的用户列表（含邮箱）
+ *     - feishuAllUsers       全公司用户（含子部门），带脚本缓存 TTL 减少飞书 API 调用
  *
  *   POST:
  *     - saveConfig                     保存 feishuScheduledReports 配置
@@ -71,6 +72,33 @@ function doGet(e) {
       var openIds = openIdsStr ? openIdsStr.split(',').map(function(id) { return id.trim(); }).filter(Boolean) : [];
       var usersByIds = getFeishuUsersByIds(openIds);
       return jsonOutput({ status: 'success', data: usersByIds });
+    }
+
+    // ===== 全公司用户（含子部门），TTL 内走缓存避免重复打飞书 API =====
+    if (action === 'feishuAllUsers') {
+      var CACHE_KEY = 'feishuAllUsers';
+      var CACHE_TTL_SEC = 600; // 10 分钟
+      var CACHE_VALUE_MAX = 100000; // ScriptCache 单值约 100KB 上限
+      var cache = CacheService.getScriptCache();
+      var cached = cache.get(CACHE_KEY);
+      if (cached) {
+        try {
+          var data = JSON.parse(cached);
+          return jsonOutput({ status: 'success', data: data });
+        } catch (err) {
+          // 缓存内容损坏则重新拉取
+        }
+      }
+      var users = getFeishuAllUsersUnderRoot();
+      var jsonStr = JSON.stringify(users);
+      if (jsonStr.length <= CACHE_VALUE_MAX) {
+        try {
+          cache.put(CACHE_KEY, jsonStr, CACHE_TTL_SEC);
+        } catch (e) {
+          Logger.log('feishuAllUsers cache put failed: ' + (e.message || e));
+        }
+      }
+      return jsonOutput({ status: 'success', data: users });
     }
 
     return jsonOutput({ status: 'error', message: 'Unknown GET action: ' + action });
