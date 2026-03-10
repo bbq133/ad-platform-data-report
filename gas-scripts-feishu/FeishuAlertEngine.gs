@@ -245,6 +245,15 @@ function executeAlertRule(rule, config, allConfigs) {
     Logger.log('[预警] 规则执行失败: ' + rule.name + ' - ' + e.message);
   }
 
+  // 服务端埋点：预警实际触发（已发送或满足条件但无收件人）
+  if (logEntry.status === 'SENT' || (logEntry.status === 'TRIGGERED' && logEntry.matchedItems && logEntry.matchedItems.length > 0)) {
+    try {
+      sendTrackingEvent('alert_trigger', 'alert_triggered: ' + rule.name, config.user);
+    } catch (err) {
+      Logger.log('[预警] 埋点发送失败: ' + (err.message || err));
+    }
+  }
+
   return logEntry;
 }
 

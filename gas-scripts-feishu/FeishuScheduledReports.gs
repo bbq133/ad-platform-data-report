@@ -183,6 +183,13 @@ function executeFeishuTask(task, config, allConfigs) {
     Logger.log('[飞书] 任务执行失败: ' + task.name + ' - ' + e.message);
   }
 
+  // 服务端埋点：定时任务实际推送（成功/失败）
+  try {
+    sendTrackingEvent('scheduled_send', 'scheduled_send_' + logEntry.status.toLowerCase() + ': ' + logEntry.taskName, config.user);
+  } catch (err) {
+    Logger.log('[飞书] 埋点发送失败: ' + (err.message || err));
+  }
+
   return logEntry;
 }
 

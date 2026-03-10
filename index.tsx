@@ -75,7 +75,7 @@ import LoginPage from './LoginPage';
 import ScheduledReportsPanel, { type ScheduledReportTask, type ScheduledReportLog, type FeishuScheduledReportTask } from './ScheduledReportsPanel';
 import AlertMonitorPanel, { type AlertRule, type AlertLog } from './AlertMonitorPanel';
 import { getUserSession, saveUserSession, clearUserSession, filterProjectsByKeywords, UserInfo, fetchSystemConfig, saveSystemConfig, getSystemConfig } from './auth-service';
-import { initTracking, trackLogin, trackProjectSelect, trackFetchData, trackExportData, trackSaveConfig, trackSavePivotPreset, trackAiAnalysis } from './tracking-service';
+import { initTracking, trackLogin, trackProjectSelect, trackFetchData, trackExportData, trackSaveConfig, trackSavePivotPreset, trackLoadPivotPreset, trackPageView, trackAiAnalysis } from './tracking-service';
 
 // --- Types ---
 
@@ -1370,6 +1370,13 @@ const App = () => {
     load();
     return () => { cancelled = true; };
   }, [currentUser?.username, selectedProject?.projectId]);
+
+  // --- 数据透视分析页面浏览埋点（切换至透视表 Tab 时上报）---
+  useEffect(() => {
+    if (activeReportTab === 'pivot' && currentUser?.username && step === 'dashboard') {
+      trackPageView(currentUser.username, '数据透视分析');
+    }
+  }, [activeReportTab, currentUser?.username, step]);
 
   // --- 广告预警监控配置加载 ---
   useEffect(() => {
@@ -2992,6 +2999,7 @@ const App = () => {
   };
 
   const handleApplyPivotPreset = (preset: PivotPreset) => {
+    if (currentUser) trackLoadPivotPreset(currentUser.username, preset.name);
     const validDimKeys = new Set(pivotDimensionFields.map(f => f.key));
     const validValueKeys = new Set(allAvailableMetrics.map(m => m.key));
     const validPlatformScopes = new Set(PIVOT_PLATFORM_OPTIONS.map(p => p.key));

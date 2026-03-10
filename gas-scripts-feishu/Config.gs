@@ -10,6 +10,8 @@
  *   FEISHU_APP_ID          - 飞书应用 App ID（cli_ 开头）
  *   FEISHU_APP_SECRET      - 飞书应用 App Secret
  *   FEISHU_FOLDER_TOKEN    - 飞书云文档文件夹 token（可选，不填则创建到应用根目录）
+ *   TRACKING_WEBHOOK_URL   - 埋点 Webhook URL（可选，与前端同一飞书多维表格 Webhook，用于服务端埋点：定时任务推送、预警触发）
+ *   TRACKING_WEBHOOK_TOKEN - 埋点 Webhook Bearer Token（可选）
  * ======================================================================
  */
 
@@ -45,4 +47,16 @@ function getFeishuAppSecret() {
 
 function getFeishuFolderToken() {
   return PropertiesService.getScriptProperties().getProperty('FEISHU_FOLDER_TOKEN') || '';
+}
+
+/**
+ * 埋点 Webhook（与前端 tracking-service 同一多维表格）
+ * 配置后，定时任务实际推送、预警实际触发时会写入埋点
+ */
+function getTrackingWebhookUrl() {
+  return PropertiesService.getScriptProperties().getProperty('TRACKING_WEBHOOK_URL') || '';
+}
+
+function getTrackingWebhookToken() {
+  return PropertiesService.getScriptProperties().getProperty('TRACKING_WEBHOOK_TOKEN') || '';
 }

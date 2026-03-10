@@ -74,6 +74,11 @@ export function trackSavePivotPreset(username: string, presetName: string): void
   track('click', `click_save_pivot_preset: ${presetName}`, username);
 }
 
+/** 加载/应用已保存的透视报告 */
+export function trackLoadPivotPreset(username: string, presetName: string): void {
+  track('click', `click_load_pivot_preset: ${presetName}`, username);
+}
+
 export function trackAiAnalysis(username: string): void {
   track('click', 'click_ai_analysis', username);
 }

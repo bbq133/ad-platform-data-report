@@ -97,6 +97,7 @@
 | 5 | `FeishuSheets.gs` | `gas-scripts-feishu/FeishuSheets.gs` | 飞书电子表格 |
 | 6 | `DataService.gs` | `gas-scripts-feishu/DataService.gs` | 数据拉取/转换/透视 |
 | 7 | `FeishuScheduledReports.gs` | `gas-scripts-feishu/FeishuScheduledReports.gs` | 飞书定时任务核心 |
+| 8 | `FeishuTracking.gs` | `gas-scripts-feishu/FeishuTracking.gs` | 服务端埋点（定时推送/预警触发） |
 
 **操作步骤**（每个文件重复）：
 1. 在 Apps Script 编辑器左侧，点击 **「文件」旁边的「+」→ 脚本**
@@ -116,7 +117,8 @@
   ├── FeishuContacts.gs
   ├── FeishuSheets.gs
   ├── DataService.gs
-  └── FeishuScheduledReports.gs
+  ├── FeishuScheduledReports.gs
+  └── FeishuTracking.gs
 ```
 
 ---
@@ -134,6 +136,8 @@
 | `FEISHU_APP_ID` | `cli_a923f13c0b7a1bd6` |
 | `FEISHU_APP_SECRET` | `zNLIbbIcaIIeQ1INSqhpCd8lfTYJxbuq` |
 | `FEISHU_FOLDER_TOKEN` | 上面第 2 步获取的文件夹 token（**必填**才能让新表格出现在该文件夹；例如 URL 为 `.../folder/Pd2ifswftldD2KdZvHKcWgeyn6e` 则填 `Pd2ifswftldD2KdZvHKcWgeyn6e`） |
+| `TRACKING_WEBHOOK_URL` | （可选）与前端埋点同一飞书多维表格 Webhook URL；配置后定时任务实际推送、预警实际触发时会写入埋点 |
+| `TRACKING_WEBHOOK_TOKEN` | （可选）埋点 Webhook 的 Bearer Token |
 
 4. 点击 **「保存脚本属性」**
 
