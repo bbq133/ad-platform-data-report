@@ -230,11 +230,15 @@ function executeTask(task, config, allConfigs) {
     var sheetUrl = reportSpreadsheet.getUrl();
     logEntry.sheetUrl = sheetUrl;
     
-    // 5. 发送邮件
-    sendReportEmail(task, sheetUrl, presetNames, dateRange);
+    // 5. 发送邮件（仅在非 updateOnly 模式）
+    if (!task.updateOnly) {
+      sendReportEmail(task, sheetUrl, presetNames, dateRange);
+    } else {
+      logEntry.emails = '(仅更新数据)';
+    }
     
     logEntry.status = 'SUCCESS';
-    Logger.log('任务执行成功: ' + task.name);
+    Logger.log('任务执行成功: ' + task.name + (task.updateOnly ? ' (仅更新)' : ''));
     
   } catch (e) {
     logEntry.errorMessage = e.message || String(e);
@@ -441,7 +445,6 @@ function createOrUpdateReportSpreadsheet(task, presets, allData, formulas) {
     spreadsheet = SpreadsheetApp.create(title);
     task.sheetFileId = spreadsheet.getId();
     
-    // 设置分享：任何有链接的人可查看
     try {
       DriveApp.getFileById(spreadsheet.getId()).setSharing(
         DriveApp.Access.ANYONE_WITH_LINK,
@@ -452,30 +455,113 @@ function createOrUpdateReportSpreadsheet(task, presets, allData, formulas) {
     }
   }
   
-  // 为每个 preset 创建 / 更新一个 Sheet Tab
+  // 构建各报告数据块
+  var GAP_COLS = 1;
+  var presetDataBlocks = [];
+  var presetNames = [];
+  
   for (var i = 0; i < presets.length; i++) {
     var preset = presets[i];
-    var sheetName = sanitizeSheetName(preset.name);
-    
-    // 根据 preset 的 filters、platformScopes 过滤数据
+    presetNames.push(preset.name || 'Report ' + (i + 1));
     var filteredData = applyPresetFilters(allData, preset);
-    
-    // 按透视维度分组聚合（与前端透视表一致），并计算 ROI 等派生指标
     var sheetData = buildPivotSheetData(filteredData, preset, formulas);
-    
-    // 写入 Sheet
-    writeToSheet(spreadsheet, sheetName, sheetData);
+    presetDataBlocks.push(sheetData);
   }
+  
+  // 水平合并所有报告到一个二维数组
+  var merged = mergePresetsHorizontallyGoogle(presetDataBlocks, presetNames, GAP_COLS);
+  
+  // 写入单个 Sheet
+  var sheetName = sanitizeSheetName(task.name || '汇总');
+  writeHorizontalToSheet(spreadsheet, sheetName, merged);
   
   // 删除默认的 Sheet1（如果存在且有其他 sheet）
   try {
     var defaultSheet = spreadsheet.getSheetByName('Sheet1') || spreadsheet.getSheetByName('工作表1');
-    if (defaultSheet && spreadsheet.getSheets().length > 1) {
+    if (defaultSheet && defaultSheet.getName() !== sheetName && spreadsheet.getSheets().length > 1) {
       spreadsheet.deleteSheet(defaultSheet);
     }
   } catch (e) { /* ignore */ }
   
   return spreadsheet;
+}
+
+/**
+ * 将多个报告数据块水平合并为一个二维数组
+ */
+function mergePresetsHorizontallyGoogle(presetDataBlocks, presetNames, gapCols) {
+  var totalCols = 0;
+  var maxRows = 0;
+  var blockStartCols = [];
+
+  for (var i = 0; i < presetDataBlocks.length; i++) {
+    blockStartCols.push(totalCols);
+    var blockCols = presetDataBlocks[i].length > 0 ? presetDataBlocks[i][0].length : 0;
+    totalCols += blockCols;
+    if (i < presetDataBlocks.length - 1) totalCols += gapCols;
+    if (presetDataBlocks[i].length > maxRows) maxRows = presetDataBlocks[i].length;
+  }
+
+  var totalRows = maxRows + 1;
+  var merged = [];
+  for (var r = 0; r < totalRows; r++) {
+    var row = [];
+    for (var c = 0; c < totalCols; c++) row.push('');
+    merged.push(row);
+  }
+
+  for (var i = 0; i < presetDataBlocks.length; i++) {
+    var startCol = blockStartCols[i];
+    merged[0][startCol] = presetNames[i];
+    var block = presetDataBlocks[i];
+    for (var r = 0; r < block.length; r++) {
+      for (var c = 0; c < block[r].length; c++) {
+        merged[r + 1][startCol + c] = block[r][c];
+      }
+    }
+  }
+
+  return merged;
+}
+
+/**
+ * 将水平合并后的数据写入单个 Sheet
+ * 第 1 行：报告名标题（浅紫色背景）
+ * 第 2 行：数据表头（蓝底白字）
+ * 冻结前 2 行
+ */
+function writeHorizontalToSheet(spreadsheet, sheetName, mergedData) {
+  var sheet = spreadsheet.getSheetByName(sheetName);
+  
+  if (sheet) {
+    sheet.clear();
+  } else {
+    sheet = spreadsheet.insertSheet(sheetName);
+  }
+  
+  if (mergedData.length > 0 && mergedData[0].length > 0) {
+    sheet.getRange(1, 1, mergedData.length, mergedData[0].length).setValues(mergedData);
+    
+    // 标题行样式
+    var titleRange = sheet.getRange(1, 1, 1, mergedData[0].length);
+    titleRange.setFontWeight('bold');
+    titleRange.setFontSize(12);
+    titleRange.setBackground('#e8eaf6');
+    
+    // 数据表头样式
+    if (mergedData.length > 1) {
+      var headerRange = sheet.getRange(2, 1, 1, mergedData[0].length);
+      headerRange.setFontWeight('bold');
+      headerRange.setBackground('#4a86e8');
+      headerRange.setFontColor('#ffffff');
+    }
+    
+    for (var c = 1; c <= mergedData[0].length; c++) {
+      sheet.autoResizeColumn(c);
+    }
+    
+    sheet.setFrozenRows(2);
+  }
 }
 
 function sanitizeSheetName(name) {

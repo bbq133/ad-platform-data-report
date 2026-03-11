@@ -363,6 +363,7 @@ export interface ScheduledReportTaskPayload {
     customDateEnd?: string;
     pivotPresetIds: string[];
     emails: string[];
+    updateOnly?: boolean;
 }
 
 /**
@@ -513,6 +514,7 @@ export interface FeishuScheduledReportTaskPayload {
     feishuRecipientType: 'users';
     feishuUserIds: string[];
     feishuSpreadsheetToken?: string;
+    updateOnly?: boolean;
 }
 
 export async function fetchFeishuDepartments(parentDepartmentId = '0'): Promise<FeishuDepartment[]> {

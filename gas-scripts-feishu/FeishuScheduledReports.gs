@@ -168,15 +168,17 @@ function executeFeishuTask(task, config, allConfigs) {
     var feishuResult = createOrUpdateFeishuReport(task, selectedPresets, transformedData, formulas);
     logEntry.sheetUrl = feishuResult.url;
 
-    // 6. 解析收件人邮箱
-    var recipientInfo = resolveFeishuRecipientEmails(task);
-    logEntry.recipients = recipientInfo.names.join(', ');
-
-    // 7. 发送邮件
-    sendFeishuReportEmail(task, feishuResult.url, presetNames, dateRange, recipientInfo.emails);
+    // 6 & 7. 解析收件人并发送邮件（仅在非 updateOnly 模式）
+    if (!task.updateOnly) {
+      var recipientInfo = resolveFeishuRecipientEmails(task);
+      logEntry.recipients = recipientInfo.names.join(', ');
+      sendFeishuReportEmail(task, feishuResult.url, presetNames, dateRange, recipientInfo.emails);
+    } else {
+      logEntry.recipients = '(仅更新数据)';
+    }
 
     logEntry.status = 'SUCCESS';
-    Logger.log('[飞书] 任务执行成功: ' + task.name);
+    Logger.log('[飞书] 任务执行成功: ' + task.name + (task.updateOnly ? ' (仅更新)' : ''));
 
   } catch (e) {
     logEntry.errorMessage = e.message || String(e);
@@ -203,14 +205,14 @@ function createOrUpdateFeishuReport(task, presets, allData, formulas) {
   if (spreadsheetToken) {
     try {
       var meta = getFeishuSheetMeta(spreadsheetToken);
-      // 删除所有已有工作表（除第一个），清空第一个用于复用
+      // 删除多余工作表（只保留第一个）
       if (meta.length > 1) {
         for (var m = 1; m < meta.length; m++) {
           deleteFeishuSheet(spreadsheetToken, meta[m].sheetId);
         }
       }
-      // 创建新工作表并写入数据
-      writePresetsToFeishuSpreadsheet(spreadsheetToken, presets, allData, formulas, meta[0] ? meta[0].sheetId : null);
+      var firstSheetId = meta[0] ? meta[0].sheetId : null;
+      writePresetsToFeishuSpreadsheetHorizontal(spreadsheetToken, firstSheetId, presets, allData, formulas);
       sheetUrl = 'https://feishu.cn/sheets/' + spreadsheetToken;
       return { token: spreadsheetToken, url: sheetUrl };
     } catch (e) {
@@ -219,68 +221,159 @@ function createOrUpdateFeishuReport(task, presets, allData, formulas) {
     }
   }
 
-  // 创建新表格（若未配置 FEISHU_FOLDER_TOKEN 则创建到应用根目录，不会出现在指定文件夹）
+  // 创建新表格
   var folderToken = getFeishuFolderToken();
-  Logger.log('[飞书] 创建新表格，FEISHU_FOLDER_TOKEN=' + (folderToken ? folderToken : '(未配置，表格将创建到应用根目录)'));
+  Logger.log('[飞书] 创建新表格，FEISHU_FOLDER_TOKEN=' + (folderToken ? folderToken : '(未配置)'));
   var title = '定时报表 - ' + task.name + ' - ' + Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd');
   var createResult = createFeishuSpreadsheet(title);
   spreadsheetToken = createResult.spreadsheetToken;
   sheetUrl = createResult.url;
   task.feishuSpreadsheetToken = spreadsheetToken;
 
-  // 设置链接为可编辑（获得链接的人可直接编辑，无需申请权限）
   setFeishuSheetPublicEditable(spreadsheetToken);
 
-  // 新表格：复用默认第一个工作表并重命名为第一个报告名，其余报告新建工作表（不删除默认表，避免删除失败导致仍显示 Sheet1）
   var defaultMeta = getFeishuSheetMeta(spreadsheetToken);
   var firstSheetId = defaultMeta.length > 0 ? defaultMeta[0].sheetId : null;
-  // #region agent log
-  Logger.log('[飞书] 新表格 defaultMeta.length=' + (defaultMeta ? defaultMeta.length : 0) + ' firstSheetId=' + (firstSheetId || 'null') + ' firstPresetName=' + (presets.length > 0 ? (presets[0].name || '') : ''));
-  // #endregion
-  writePresetsToFeishuSpreadsheet(spreadsheetToken, presets, allData, formulas, firstSheetId);
+  writePresetsToFeishuSpreadsheetHorizontal(spreadsheetToken, firstSheetId, presets, allData, formulas);
 
   return { token: spreadsheetToken, url: sheetUrl };
 }
 
 /**
- * 向飞书表格写入所有 preset 的报告数据
- * @param {string} spreadsheetToken
- * @param {Array} presets 选中的报告配置
- * @param {Array} allData 转换后的广告数据
- * @param {Array} formulas 用户自定义公式
- * @param {string|null} firstSheetId 第一个工作表 ID（可复用，避免多一个空白 Sheet）
+ * 将多个 preset 的报告数据水平并排写入同一个飞书工作表
+ * 布局：每个报告占一块列区域，块之间空一列
+ * 第 1 行：报告名标题
+ * 第 2 行起：表头 + 数据
  */
-function writePresetsToFeishuSpreadsheet(spreadsheetToken, presets, allData, formulas, firstSheetId) {
+function writePresetsToFeishuSpreadsheetHorizontal(spreadsheetToken, sheetId, presets, allData, formulas) {
+  var GAP_COLS = 1;
+  var presetDataBlocks = [];
+  var presetNames = [];
+
   for (var i = 0; i < presets.length; i++) {
     var preset = presets[i];
-    var sheetName = sanitizeFeishuSheetName(preset.name);
-
-    // 过滤 + 透视聚合
+    presetNames.push(preset.name || 'Report ' + (i + 1));
     var filteredData = applyPresetFilters(allData, preset);
     var sheetData = buildPivotSheetData(filteredData, preset, formulas);
+    presetDataBlocks.push(sheetData);
+  }
 
-    var sheetId;
-    if (i === 0 && firstSheetId) {
-      // 复用已有表格时：复用第一个工作表并重命名为报告名
-      sheetId = firstSheetId;
-      // #region agent log
-      Logger.log('[飞书] 重命名第一个工作表 i=0 firstSheetId=' + firstSheetId + ' sheetName="' + sheetName + '" preset.name="' + (preset.name || '') + '"');
-      // #endregion
-      renameFeishuSheet(spreadsheetToken, sheetId, sheetName);
-      // 刷新服务端 meta，避免后续 addFeishuSheet 时飞书 snapshot 仍含旧表名导致 "sheetTitle already exist in snapshot"
-      getFeishuSheetMeta(spreadsheetToken);
-    } else {
-      // 新建工作表（名称即为报告名，如 test、campaign +AO+country）
-      sheetId = addFeishuSheet(spreadsheetToken, sheetName);
+  var merged = mergePresetsHorizontally(presetDataBlocks, presetNames, GAP_COLS);
+
+  // 重命名工作表
+  if (sheetId) {
+    renameFeishuSheet(spreadsheetToken, sheetId, '汇总');
+    getFeishuSheetMeta(spreadsheetToken);
+  }
+
+  writeDataToFeishuSheet(spreadsheetToken, sheetId, merged);
+
+  if (merged.length > 0 && merged[0].length > 0) {
+    formatFeishuHorizontalHeaders(spreadsheetToken, sheetId, merged[0].length);
+  }
+}
+
+/**
+ * 将多个报告数据块水平合并为一个二维数组
+ * 第 1 行放报告名标题，第 2 行起放各报告的表头+数据
+ */
+function mergePresetsHorizontally(presetDataBlocks, presetNames, gapCols) {
+  var totalCols = 0;
+  var maxRows = 0;
+  var blockStartCols = [];
+
+  for (var i = 0; i < presetDataBlocks.length; i++) {
+    blockStartCols.push(totalCols);
+    var blockCols = presetDataBlocks[i].length > 0 ? presetDataBlocks[i][0].length : 0;
+    totalCols += blockCols;
+    if (i < presetDataBlocks.length - 1) totalCols += gapCols;
+    if (presetDataBlocks[i].length > maxRows) maxRows = presetDataBlocks[i].length;
+  }
+
+  var totalRows = maxRows + 1;
+  var merged = [];
+  for (var r = 0; r < totalRows; r++) {
+    var row = [];
+    for (var c = 0; c < totalCols; c++) row.push('');
+    merged.push(row);
+  }
+
+  for (var i = 0; i < presetDataBlocks.length; i++) {
+    var startCol = blockStartCols[i];
+    merged[0][startCol] = presetNames[i];
+    var block = presetDataBlocks[i];
+    for (var r = 0; r < block.length; r++) {
+      for (var c = 0; c < block[r].length; c++) {
+        merged[r + 1][startCol + c] = block[r][c];
+      }
     }
+  }
 
-    // 写入数据
-    writeDataToFeishuSheet(spreadsheetToken, sheetId, sheetData);
+  return merged;
+}
 
-    // 格式化表头
-    if (sheetData.length > 0 && sheetData[0].length > 0) {
-      formatFeishuSheetHeader(spreadsheetToken, sheetId, sheetData[0].length);
-    }
+/**
+ * 为水平布局设置表头样式：
+ * 第 1 行（标题行）：加粗 + 浅紫色背景
+ * 第 2 行（数据表头）：加粗 + 蓝底白字
+ * 冻结前 2 行
+ */
+function formatFeishuHorizontalHeaders(spreadsheetToken, sheetId, numCols) {
+  var endCol = colIndexToLetter(numCols - 1);
+
+  try {
+    var styleUrl = FEISHU_API_BASE + '/sheets/v2/spreadsheets/' + spreadsheetToken + '/styles_batch_update';
+    var styleBody = {
+      data: [
+        {
+          ranges: sheetId + '!A1:' + endCol + '1',
+          style: {
+            font: { bold: true, fontSize: '12' },
+            backColor: '#E8EAF6'
+          }
+        },
+        {
+          ranges: sheetId + '!A2:' + endCol + '2',
+          style: {
+            font: { bold: true },
+            backColor: '#4A86E8',
+            foreColor: '#FFFFFF'
+          }
+        }
+      ]
+    };
+
+    UrlFetchApp.fetch(styleUrl, {
+      method: 'put',
+      headers: feishuHeaders(),
+      payload: JSON.stringify(styleBody),
+      muteHttpExceptions: true
+    });
+  } catch (e) {
+    Logger.log('[飞书] 设置水平布局表头样式失败: ' + e.message);
+  }
+
+  try {
+    var freezeUrl = FEISHU_API_BASE + '/sheets/v2/spreadsheets/' + spreadsheetToken + '/sheets_batch_update';
+    var freezeBody = {
+      requests: [{
+        updateSheet: {
+          properties: {
+            sheetId: String(sheetId),
+            frozenRowCount: 2
+          }
+        }
+      }]
+    };
+
+    UrlFetchApp.fetch(freezeUrl, {
+      method: 'post',
+      headers: feishuHeaders(),
+      payload: JSON.stringify(freezeBody),
+      muteHttpExceptions: true
+    });
+  } catch (e) {
+    Logger.log('[飞书] 冻结行失败: ' + e.message);
   }
 }
 
