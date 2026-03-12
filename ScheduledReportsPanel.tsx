@@ -70,6 +70,8 @@ export interface FeishuScheduledReportTask {
   pivotPresetIds: string[];
   feishuUserIds: string[];
   feishuSpreadsheetToken?: string;
+  feishuCurrentSheetId?: string;
+  feishuLastPresetIds?: string[];
   updateOnly?: boolean;
   lastRunAt?: string;
   createdAt: string;
@@ -194,7 +196,7 @@ const ScheduledReportsPanel: React.FC<Props> = ({
   const [formCustomDateEnd, setFormCustomDateEnd] = useState('');
 
   // --- Update only mode ---
-  const [formUpdateOnly, setFormUpdateOnly] = useState(false);
+  const [formUpdateOnly, setFormUpdateOnly] = useState(true);
 
   // --- Google mode form ---
   const [formEmails, setFormEmails] = useState('');
@@ -321,7 +323,7 @@ const ScheduledReportsPanel: React.FC<Props> = ({
     setFormPresetIds([]);
     setFormEmails('');
     setFormActive(true);
-    setFormUpdateOnly(false);
+    setFormUpdateOnly(true);
     setFormDateRangePreset('last3');
     setFormCustomDateStart('');
     setFormCustomDateEnd('');
@@ -344,7 +346,7 @@ const ScheduledReportsPanel: React.FC<Props> = ({
     const validIds = new Set(pivotPresets.map(p => p.id));
     setFormPresetIds(task.pivotPresetIds.filter((pid: string) => validIds.has(pid)));
     setFormActive(task.active);
-    setFormUpdateOnly(task.updateOnly ?? false);
+    setFormUpdateOnly(task.updateOnly ?? true);
     setFormDateRangePreset(task.dateRangePreset ?? 'last3');
     setFormCustomDateStart(task.customDateStart ?? '');
     setFormCustomDateEnd(task.customDateEnd ?? '');
@@ -359,11 +361,12 @@ const ScheduledReportsPanel: React.FC<Props> = ({
 
   const isFormValid = () => {
     if (!formName.trim() || formPresetIds.length === 0) return false;
-    if (formUpdateOnly) return true;
     if (reportMode === 'google') {
+      if (formUpdateOnly) return true;
       const emailList = formEmails.split(/[,;\n]+/).map(e => e.trim()).filter(Boolean);
       return emailList.length > 0;
     }
+    // 飞书：非仅更新需收件人，仅更新需至少一名通知对象（收飞书 IM）
     return formFeishuUserIds.length > 0;
   };
 
@@ -404,6 +407,8 @@ const ScheduledReportsPanel: React.FC<Props> = ({
         pivotPresetIds: formPresetIds,
         feishuUserIds: formFeishuUserIds,
         feishuSpreadsheetToken: editingTask?.feishuSpreadsheetToken,
+        feishuCurrentSheetId: editingTask?.feishuCurrentSheetId,
+        feishuLastPresetIds: editingTask?.feishuLastPresetIds,
         updateOnly: formUpdateOnly,
         lastRunAt: editingTask?.lastRunAt,
         createdAt: editingTask?.createdAt ?? new Date().toISOString(),
@@ -503,7 +508,10 @@ const ScheduledReportsPanel: React.FC<Props> = ({
   };
 
   const getRecipientSummary = (task: any) => {
-    if (task.updateOnly) return '仅更新数据';
+    if (task.updateOnly) {
+      const n = task.feishuUserIds?.length || 0;
+      return n > 0 ? `仅更新，通知 ${n} 人` : '仅更新数据';
+    }
     if (reportMode === 'google') {
       const emails = task.emails || [];
       return emails.length > 1 ? `${emails[0]} +${emails.length - 1}` : emails[0] || '-';
@@ -702,17 +710,6 @@ const ScheduledReportsPanel: React.FC<Props> = ({
                     )}
                   </div>
 
-                  {/* Update Only Toggle */}
-                  <div className="flex items-center justify-between bg-slate-800/50 rounded-xl border border-slate-700 p-4">
-                    <div>
-                      <label className="text-sm font-bold text-slate-300 block">仅更新数据（不发送邮件）</label>
-                      <p className="text-[10px] text-slate-500 mt-1">开启后，定时任务仅更新在线文档数据，不会发送邮件通知</p>
-                    </div>
-                    <button onClick={() => setFormUpdateOnly(!formUpdateOnly)} className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${formUpdateOnly ? 'bg-amber-600' : 'bg-slate-700'}`}>
-                      <div className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${formUpdateOnly ? 'translate-x-5' : ''}`} />
-                    </button>
-                  </div>
-
                   {/* Frequency */}
                   <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">{formUpdateOnly ? '更新频率' : '发送频率'}</label>
@@ -773,17 +770,20 @@ const ScheduledReportsPanel: React.FC<Props> = ({
                     </p>
                   </div>
 
-                  {/* === Recipients: Google = email input, Feishu = contact picker (hidden when updateOnly) === */}
-                  {!formUpdateOnly && reportMode === 'google' ? (
+                  {/* === Recipients: Google = email (when not updateOnly); Feishu = 收件人 or 通知对象（飞书 IM） === */}
+                  {reportMode === 'google' && !formUpdateOnly ? (
                     <div>
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">收件邮箱</label>
                       <textarea value={formEmails} onChange={e => setFormEmails(e.target.value)} placeholder="输入邮箱地址，多个邮箱用逗号或换行分隔" rows={3} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white font-medium outline-none focus:border-indigo-500 transition placeholder-slate-600 resize-none" />
                     </div>
-                  ) : !formUpdateOnly ? (
+                  ) : reportMode === 'feishu' ? (
                     <div>
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">
-                        收件人（飞书通讯录）<span className="text-slate-500 ml-1">已选 {formFeishuUserIds.length} 人</span>
+                        {formUpdateOnly ? '通知对象（飞书 IM）' : '收件人（飞书通讯录）'}<span className="text-slate-500 ml-1">已选 {formFeishuUserIds.length} 人</span>
                       </label>
+                      {formUpdateOnly && (
+                        <p className="text-[10px] text-amber-500/90 mb-2">更新后将通过飞书私信通知以下用户，不发送邮件</p>
+                      )}
 
                       {/* Selected user tags */}
                       {formFeishuUserIds.length > 0 && (

@@ -168,13 +168,20 @@ function executeFeishuTask(task, config, allConfigs) {
     var feishuResult = createOrUpdateFeishuReport(task, selectedPresets, transformedData, formulas);
     logEntry.sheetUrl = feishuResult.url;
 
-    // 6 & 7. 解析收件人并发送邮件（仅在非 updateOnly 模式）
+    // 6 & 7. 非 updateOnly：发邮件；updateOnly：发飞书 IM 更新通知
     if (!task.updateOnly) {
       var recipientInfo = resolveFeishuRecipientEmails(task);
       logEntry.recipients = recipientInfo.names.join(', ');
       sendFeishuReportEmail(task, feishuResult.url, presetNames, dateRange, recipientInfo.emails);
     } else {
-      logEntry.recipients = '(仅更新数据)';
+      if (task.feishuUserIds && task.feishuUserIds.length > 0) {
+        var imContent = buildReportUpdatedMessageContent(task, feishuResult.url, presetNames, dateRange);
+        var notifiedNames = sendFeishuAlertMessages(task.feishuUserIds, imContent);
+        logEntry.recipients = notifiedNames.length > 0 ? ('已通知: ' + notifiedNames.join(', ')) : '已通知 ' + task.feishuUserIds.length + ' 人';
+        Logger.log('[飞书] 已发送报告更新 IM 通知: ' + task.feishuUserIds.length + ' 人');
+      } else {
+        logEntry.recipients = '(仅更新数据，未配置通知对象)';
+      }
     }
 
     logEntry.status = 'SUCCESS';
@@ -197,6 +204,29 @@ function executeFeishuTask(task, config, allConfigs) {
 
 // ==================== 飞书表格创建 ====================
 
+/**
+ * 比较两个 preset ID 数组是否一致（顺序敏感，用于判断报告结构是否变更）
+ */
+function presetIdsEqual(a, b) {
+  if (!a && !b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * 在 meta 中按 sheetId 查找工作表信息
+ */
+function findSheetById(meta, sheetId) {
+  if (!meta || !sheetId) return null;
+  for (var i = 0; i < meta.length; i++) {
+    if (String(meta[i].sheetId) === String(sheetId)) return meta[i];
+  }
+  return null;
+}
+
 function createOrUpdateFeishuReport(task, presets, allData, formulas) {
   var spreadsheetToken = task.feishuSpreadsheetToken || '';
   var sheetUrl = '';
@@ -205,14 +235,39 @@ function createOrUpdateFeishuReport(task, presets, allData, formulas) {
   if (spreadsheetToken) {
     try {
       var meta = getFeishuSheetMeta(spreadsheetToken);
-      // 删除多余工作表（只保留第一个）
-      if (meta.length > 1) {
-        for (var m = 1; m < meta.length; m++) {
-          deleteFeishuSheet(spreadsheetToken, meta[m].sheetId);
-        }
+      if (!meta || meta.length === 0) {
+        throw new Error('表格无工作表');
       }
-      var firstSheetId = meta[0] ? meta[0].sheetId : null;
-      writePresetsToFeishuSpreadsheetHorizontal(spreadsheetToken, firstSheetId, presets, allData, formulas);
+
+      var currentSheetId = null;
+      var lastPresetIds = task.feishuLastPresetIds;
+      var currentPresetIds = task.pivotPresetIds || [];
+
+      // 确定当前用于数据的 sheet
+      if (task.feishuCurrentSheetId && findSheetById(meta, task.feishuCurrentSheetId)) {
+        currentSheetId = task.feishuCurrentSheetId;
+      } else {
+        currentSheetId = meta[0].sheetId;
+      }
+
+      var structureUnchanged = presetIdsEqual(currentPresetIds, lastPresetIds) && task.feishuCurrentSheetId;
+
+      if (structureUnchanged) {
+        // 报告结构未变：在原 sheet 上覆盖更新数据
+        Logger.log('[飞书] 报告结构未变，在原 sheet 上更新数据');
+        writePresetsToFeishuSpreadsheetHorizontal(spreadsheetToken, currentSheetId, presets, allData, formulas);
+      } else {
+        // 报告结构变更或首次：当前 sheet 标为历史版本，新建「汇总」并写入
+        var historyTitle = '历史版本 ' + Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd HH:mm');
+        renameFeishuSheet(spreadsheetToken, currentSheetId, historyTitle);
+        getFeishuSheetMeta(spreadsheetToken);
+        var newSheetId = addFeishuSheet(spreadsheetToken, '汇总');
+        writePresetsToFeishuSpreadsheetHorizontal(spreadsheetToken, newSheetId, presets, allData, formulas);
+        task.feishuCurrentSheetId = newSheetId;
+        task.feishuLastPresetIds = currentPresetIds.slice();
+        Logger.log('[飞书] 报告结构已变更，已归档为历史并新建汇总 sheet');
+      }
+
       sheetUrl = 'https://feishu.cn/sheets/' + spreadsheetToken;
       return { token: spreadsheetToken, url: sheetUrl };
     } catch (e) {
@@ -235,6 +290,9 @@ function createOrUpdateFeishuReport(task, presets, allData, formulas) {
   var defaultMeta = getFeishuSheetMeta(spreadsheetToken);
   var firstSheetId = defaultMeta.length > 0 ? defaultMeta[0].sheetId : null;
   writePresetsToFeishuSpreadsheetHorizontal(spreadsheetToken, firstSheetId, presets, allData, formulas);
+
+  task.feishuCurrentSheetId = firstSheetId;
+  task.feishuLastPresetIds = (task.pivotPresetIds || []).slice();
 
   return { token: spreadsheetToken, url: sheetUrl };
 }
@@ -407,6 +465,41 @@ function renameFeishuSheet(spreadsheetToken, sheetId, newTitle) {
     Logger.log('[飞书] renameFeishuSheet 失败 sheetId=' + sheetId + ' newTitle="' + newTitle + '"');
   }
   // #endregion
+}
+
+// ==================== 报告已更新 - 飞书 IM 通知 ====================
+
+/**
+ * 构建「报告数据已更新」飞书 IM 消息内容（post 格式，与 FeishuAlertEngine 一致）
+ * @param {Object} task 定时任务
+ * @param {string} sheetUrl 飞书表格 URL
+ * @param {string[]} presetNames 报告名称列表
+ * @param {Object} dateRange { start, end }
+ * @return {Object} 供 sendFeishuAlertMessages 使用的 messageContent
+ */
+function buildReportUpdatedMessageContent(task, sheetUrl, presetNames, dateRange) {
+  var presetList = presetNames.map(function(name, idx) {
+    return '  ' + (idx + 1) + '. ' + name;
+  }).join('\n');
+
+  var content = [
+    [{ tag: 'text', text: '任务名称: ' + task.name }],
+    [{ tag: 'text', text: '数据范围: ' + dateRange.start + ' ~ ' + dateRange.end }],
+    [{ tag: 'text', text: '' }],
+    [{ tag: 'text', text: '包含报告:' }],
+    [{ tag: 'text', text: presetList }],
+    [{ tag: 'text', text: '' }],
+    [{ tag: 'a', href: sheetUrl, text: '点击查看在线报表' }],
+    [{ tag: 'text', text: '' }],
+    [{ tag: 'text', text: '更新时间: ' + Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd HH:mm') + ' (GMT+8)' }]
+  ];
+
+  return {
+    zh_cn: {
+      title: '【广告数据报表】数据已更新 - ' + task.name,
+      content: content
+    }
+  };
 }
 
 // ==================== 邮件发送 ====================

@@ -134,7 +134,10 @@ function fetchAdDataFromApi(projectId, startDate, endDate) {
       };
 
       var response = UrlFetchApp.fetch(url, options);
+      var respCode = response.getResponseCode();
       var result = JSON.parse(response.getContentText());
+      var dataLen = (result.data && Array.isArray(result.data)) ? result.data.length : 0;
+      Logger.log('[DEBUG fetchAdDataFromApi] platform=' + platforms[p] + ' respCode=' + respCode + ' result.code=' + (result.code) + ' dataLen=' + dataLen + (result.code !== 200 ? ' msg=' + (result.msg || result.message || '') : ''));
 
       if (result.code === 200 && result.data) {
         allData = allData.concat(result.data);
@@ -144,6 +147,7 @@ function fetchAdDataFromApi(projectId, startDate, endDate) {
     }
   }
 
+  Logger.log('[DEBUG fetchAdDataFromApi] projectId=' + projectId + ' totalRows=' + allData.length);
   return allData;
 }
 

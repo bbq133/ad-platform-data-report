@@ -514,6 +514,8 @@ export interface FeishuScheduledReportTaskPayload {
     feishuRecipientType: 'users';
     feishuUserIds: string[];
     feishuSpreadsheetToken?: string;
+    feishuCurrentSheetId?: string;
+    feishuLastPresetIds?: string[];
     updateOnly?: boolean;
 }
 
