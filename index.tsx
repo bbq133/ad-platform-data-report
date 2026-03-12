@@ -5737,6 +5737,7 @@ const App = () => {
                 logs={alertLogs}
                 setLogs={setAlertLogs}
                 isLoading={isLoadingAlerts}
+                isBright={isBright}
               />
             )}
           </div>

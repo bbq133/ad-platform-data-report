@@ -84,6 +84,7 @@ interface Props {
   logs: AlertLog[];
   setLogs: React.Dispatch<React.SetStateAction<AlertLog[]>>;
   isLoading?: boolean;
+  isBright?: boolean;
 }
 
 // --- Constants ---
@@ -155,6 +156,7 @@ const AlertMonitorPanel: React.FC<Props> = ({
   logs,
   setLogs,
   isLoading = false,
+  isBright = false,
 }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
@@ -487,7 +489,7 @@ const AlertMonitorPanel: React.FC<Props> = ({
       )}
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 mb-6 bg-slate-800/50 p-1 rounded-xl w-fit">
+      <div className={`flex items-center gap-1 mb-6 p-1 rounded-xl w-fit ${isBright ? 'bg-slate-100 border border-slate-200' : 'bg-slate-800/50'}`}>
         {[
           { id: 'rules' as const, label: '预警规则', icon: Bell },
           { id: 'history' as const, label: '触发记录', icon: History },
@@ -495,7 +497,11 @@ const AlertMonitorPanel: React.FC<Props> = ({
           <button
             key={id}
             onClick={() => setActiveTab(id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === id ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+              activeTab === id
+                ? (isBright ? 'bg-white text-slate-700 border border-slate-200 shadow-sm' : 'bg-slate-700 text-white shadow')
+                : (isBright ? 'text-slate-500 hover:text-slate-700 hover:bg-slate-200' : 'text-slate-400 hover:text-slate-200')
+            }`}
           >
             <Icon size={14} />
             {label}
