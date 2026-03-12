@@ -51,7 +51,9 @@ import {
   AlertTriangle,
   CheckSquare,
   HelpCircle,
-  Clock
+  Clock,
+  Sun,
+  Moon
 } from 'lucide-react';
 import {
   XAxis,
@@ -74,6 +76,7 @@ import { fetchAllPlatformsData, transformApiDataToRawData, fetchProjectList, ext
 import LoginPage from './LoginPage';
 import ScheduledReportsPanel, { type ScheduledReportTask, type ScheduledReportLog, type FeishuScheduledReportTask } from './ScheduledReportsPanel';
 import AlertMonitorPanel, { type AlertRule, type AlertLog } from './AlertMonitorPanel';
+import { UiModeProvider, useUiMode } from './ui-mode-context';
 import { getUserSession, saveUserSession, clearUserSession, filterProjectsByKeywords, UserInfo, fetchSystemConfig, saveSystemConfig, getSystemConfig } from './auth-service';
 import { initTracking, trackLogin, trackProjectSelect, trackFetchData, trackExportData, trackSaveConfig, trackSavePivotPreset, trackLoadPivotPreset, trackPageView, trackAiAnalysis } from './tracking-service';
 
@@ -615,6 +618,7 @@ const mergeDimConfigsWithPivotDefaults = (fromCloud: DimensionConfig[]): Dimensi
 // --- Main App ---
 
 const App = () => {
+  const { uiMode, setUiMode } = useUiMode();
   // --- Login State ---
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserInfo | null>(null);
@@ -1626,8 +1630,12 @@ const App = () => {
             dims[conf.label] = 'N/A';
           }
         } else if (conf.source === 'age' || conf.source === 'gender') {
-          const sourceCol = curMap[conf.source] || (conf.source === 'age' ? 'Age' : 'Gender');
-          const sourceVal = row[sourceCol] ?? row[conf.source === 'age' ? 'Age' : 'Gender'];
+          const standardCol = conf.source === 'age' ? 'Age' : 'Gender';
+          const sourceCol = curMap[conf.source] || standardCol;
+          let sourceVal = row[sourceCol];
+          if (sourceVal == null || String(sourceVal).trim() === '') {
+            sourceVal = row[standardCol];
+          }
           dims[conf.label] = normalizeDimValue(sourceVal) || 'N/A';
         } else if (conf.source === 'country') {
           const sourceCol = curMap.country || 'Country';
@@ -2134,7 +2142,7 @@ const App = () => {
       return seg === targetSeg;
     };
 
-    return filteredData.filter(row => {
+    const result = filteredData.filter(row => {
       if (row._platform === 'facebook') {
         if (!scopeSet.has('meta')) return false;
         return matchesSegment(row);
@@ -2150,6 +2158,8 @@ const App = () => {
       }
       return pivotPlatformScopes.length === DEFAULT_PIVOT_PLATFORM_SCOPES.length;
     });
+
+    return result;
   }, [filteredData, pivotPlatformScopes, pivotSegmentMode]);
 
   const pivotDimensionValueOptions = useMemo(() => {
@@ -2437,7 +2447,7 @@ const App = () => {
     // 若云端已有非空映射且该列仍在新表头中，则保留；否则用自动匹配。这样拉数后不会覆盖已保存的 metrics 配置
     const pick = (hdrs: string[], targets: string[], existing: string | undefined, exclude?: (h: string) => boolean): string => {
       const existingVal = (existing || '').trim();
-      if (existingVal && hdrs.includes(existingVal)) return existingVal;
+      if (existingVal && hdrs.includes(existingVal) && !(exclude && exclude(existingVal))) return existingVal;
       return findMatch(hdrs, targets, exclude);
     };
 
@@ -2448,7 +2458,7 @@ const App = () => {
       campaign: pick(hdrs, ['campaign name'], existing.campaign, excludeCampaignId),
       adSet: pick(hdrs, ['ad set name', 'adset'], existing.adSet, (h) => /ad\s*set\s*id|adsetid/i.test(h)),
       ad: pick(hdrs, ['ad name', 'creative'], existing.ad, (h) => /\bad\s*id\b|^adid$/i.test(h)),
-      age: pick(hdrs, ['age'], existing.age),
+      age: pick(hdrs, ['age'], existing.age, (h) => /image|page/i.test(h)),
       gender: pick(hdrs, ['gender'], existing.gender),
       country: pick(hdrs, ['country'], existing.country),
       cost: pick(hdrs, ['amount spent', 'spend', 'cost'], existing.cost),
@@ -3685,50 +3695,56 @@ const App = () => {
 
       {activeReportTab === 'pivot' && (
         <section id="report-module-pivot" className="scroll-mt-32">
-          <div className="bg-slate-900/50 p-10 rounded-[48px] border border-slate-800 shadow-sm relative overflow-visible">
+          <div
+            className={
+              isBright
+                ? 'bg-white p-10 rounded-2xl border border-slate-200 shadow-sm relative overflow-visible'
+                : 'bg-slate-800/60 p-10 rounded-[48px] border border-slate-700/80 shadow-sm relative overflow-visible'
+            }
+          >
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-8">
               <div>
-                <h3 className="text-2xl font-black text-white tracking-tight">数据透视分析</h3>
-                <p className="text-slate-400 text-[11px] font-black uppercase tracking-[0.2em]">Pivot · Rows / Columns / Values / Filters</p>
+                <h3 className={`text-2xl font-black tracking-tight font-heading ${isBright ? 'text-blue-900' : 'text-white'}`}>数据透视分析</h3>
+                <p className={isBright ? 'text-slate-500 text-[11px] font-bold uppercase tracking-[0.2em]' : 'text-slate-300 text-[11px] font-bold uppercase tracking-[0.2em]'}>Pivot · Rows / Columns / Values / Filters</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <button onClick={() => setIsSavePivotModalOpen(true)} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition">【保存为新的报告】</button>
+                <button onClick={() => setIsSavePivotModalOpen(true)} className={isBright ? 'px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-black hover:bg-slate-200 transition cursor-pointer border border-slate-200' : 'px-4 py-2 rounded-xl bg-slate-700 text-slate-200 text-xs font-black hover:bg-slate-600 transition'}>【保存为新的报告】</button>
                 <div className="relative" ref={pivotPresetDropdownRef}>
                   <button
                     type="button"
                     onClick={() => setIsPivotPresetDropdownOpen(v => !v)}
-                    className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition flex items-center gap-2"
+                    className={isBright ? 'px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-black hover:bg-slate-200 transition flex items-center gap-2 cursor-pointer border border-slate-200' : 'px-4 py-2 rounded-xl bg-slate-700 text-slate-200 text-xs font-black hover:bg-slate-600 transition flex items-center gap-2'}
                     aria-expanded={isPivotPresetDropdownOpen}
                     aria-haspopup="listbox"
                   >
                     已保存报告
-                    {pivotPresets.length > 0 && <span className="bg-indigo-600 text-white text-[10px] px-1.5 py-0.5 rounded-full">{pivotPresets.length}</span>}
+                    {pivotPresets.length > 0 && <span className={isBright ? 'bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded-full' : 'bg-indigo-600 text-white text-[10px] px-1.5 py-0.5 rounded-full'}>{pivotPresets.length}</span>}
                     <ChevronDown size={12} className={`transition-transform ${isPivotPresetDropdownOpen ? 'rotate-180' : ''}`} />
                   </button>
                   {isPivotPresetDropdownOpen && (
-                    <div className="absolute right-0 top-full mt-2 w-56 bg-slate-900 border border-slate-800 rounded-xl shadow-xl p-2 z-[50] max-h-64 overflow-y-auto custom-scrollbar" role="listbox">
+                    <div className={isBright ? 'absolute right-0 top-full mt-2 w-56 bg-white border border-slate-200 rounded-xl shadow-lg p-2 z-[50] max-h-64 overflow-y-auto custom-scrollbar' : 'absolute right-0 top-full mt-2 w-56 bg-slate-800 border border-slate-700 rounded-xl shadow-xl p-2 z-[50] max-h-64 overflow-y-auto custom-scrollbar'} role="listbox">
                       {pivotPresets.length === 0 ? (
-                        <p className="px-3 py-4 text-xs text-slate-500 text-center">暂无已保存报告</p>
+                        <p className={`px-3 py-4 text-xs text-center ${isBright ? 'text-slate-500' : 'text-slate-500'}`}>暂无已保存报告</p>
                       ) : (
                         pivotPresets.map(p => (
                           <div
                             key={p.id}
-                            className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800 transition group cursor-pointer"
+                            className={isBright ? 'flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 transition group cursor-pointer' : 'flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-700 transition group cursor-pointer'}
                             onClick={() => handleApplyPivotPreset(p)}
                             role="button"
                             tabIndex={0}
                             onKeyDown={(e) => { if (e.key === 'Enter') handleApplyPivotPreset(p); }}
                           >
-                            <span className="flex-1 text-left text-xs font-bold text-slate-200 truncate min-w-0 tracking-normal">
+                            <span className={`flex-1 text-left text-xs font-bold truncate min-w-0 tracking-normal ${isBright ? 'text-slate-800' : 'text-slate-200'}`}>
                               {p.name}
                             </span>
-                            <button onClick={(e) => { e.stopPropagation(); setIsPivotPresetDropdownOpen(false); setRenamePresetId(p.id); setRenamePresetNameInput(p.name); }} className="p-1 text-slate-500 hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="修改报告名称">
+                            <button onClick={(e) => { e.stopPropagation(); setIsPivotPresetDropdownOpen(false); setRenamePresetId(p.id); setRenamePresetNameInput(p.name); }} className={isBright ? 'p-1 text-slate-500 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition shrink-0' : 'p-1 text-slate-500 hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition shrink-0'} title="修改报告名称">
                               <Edit3 size={12} />
                             </button>
-                            <button onClick={(e) => handleUpdatePivotPreset(p.id, e)} className="p-1 text-slate-500 hover:text-amber-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="用当前配置覆盖">
+                            <button onClick={(e) => handleUpdatePivotPreset(p.id, e)} className="p-1 text-slate-500 hover:text-amber-500 opacity-0 group-hover:opacity-100 transition shrink-0" title="用当前配置覆盖">
                               <RefreshCcw size={12} />
                             </button>
-                            <button onClick={(e) => handleRemovePivotPreset(p.id, e)} className="p-1 text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="删除">
+                            <button onClick={(e) => handleRemovePivotPreset(p.id, e)} className="p-1 text-slate-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition shrink-0" title="删除">
                               <Trash2 size={12} />
                             </button>
                           </div>
@@ -3740,29 +3756,29 @@ const App = () => {
                 {activePivotPresetId && (
                   <button
                     onClick={() => handleUpdatePivotPreset(activePivotPresetId)}
-                    className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-500 transition flex items-center gap-2"
+                    className={isBright ? 'px-4 py-2 rounded-xl bg-amber-500 text-white text-xs font-black hover:bg-amber-400 transition flex items-center gap-2 cursor-pointer' : 'px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-500 transition flex items-center gap-2'}
                     title="将当前字段配置保存到当前报告"
                   >
                     【更新当前报告设置】
                   </button>
                 )}
-                <button onClick={copyPivotToClipboard} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition">复制表格</button>
+                <button onClick={copyPivotToClipboard} className={isBright ? 'px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-black hover:bg-slate-200 transition cursor-pointer border border-slate-200' : 'px-4 py-2 rounded-xl bg-slate-700 text-slate-200 text-xs font-black hover:bg-slate-600 transition'}>复制表格</button>
                 <div className="relative" ref={pivotExportRef}>
                   <button
                     onClick={() => setIsPivotExportOpen(v => !v)}
-                    className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition flex items-center gap-2"
+                    className={isBright ? 'px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-black hover:bg-slate-200 transition flex items-center gap-2 cursor-pointer border border-slate-200' : 'px-4 py-2 rounded-xl bg-slate-700 text-slate-200 text-xs font-black hover:bg-slate-600 transition flex items-center gap-2'}
                   >
                     导出
                     <ChevronDown size={12} className={`transition-transform ${isPivotExportOpen ? 'rotate-180' : ''}`} />
                   </button>
                   {isPivotExportOpen && (
-                    <div className="absolute right-0 mt-2 w-36 bg-slate-900 border border-slate-800 rounded-xl shadow-xl p-2 z-20">
-                      <button onClick={() => { exportPivotData('csv'); setIsPivotExportOpen(false); }} className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 rounded-lg">导出 CSV</button>
-                      <button onClick={() => { exportPivotData('xlsx'); setIsPivotExportOpen(false); }} className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 rounded-lg">导出 Excel</button>
+                    <div className={isBright ? 'absolute right-0 mt-2 w-36 bg-white border border-slate-200 rounded-xl shadow-lg p-2 z-20' : 'absolute right-0 mt-2 w-36 bg-slate-800 border border-slate-700 rounded-xl shadow-xl p-2 z-20'}>
+                      <button onClick={() => { exportPivotData('csv'); setIsPivotExportOpen(false); }} className={isBright ? 'w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer' : 'w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-slate-700 rounded-lg'}>导出 CSV</button>
+                      <button onClick={() => { exportPivotData('xlsx'); setIsPivotExportOpen(false); }} className={isBright ? 'w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer' : 'w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-slate-700 rounded-lg'}>导出 Excel</button>
                     </div>
                   )}
                 </div>
-                <button onClick={() => setIsPivotDrawerOpen(v => !v)} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-700 transition">
+                <button onClick={() => setIsPivotDrawerOpen(v => !v)} className={isBright ? 'px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-black hover:bg-blue-500 transition cursor-pointer' : 'px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-700 transition'}>
                   {isPivotDrawerOpen ? '收起字段配置' : '字段配置'}
                 </button>
               </div>
@@ -3776,13 +3792,13 @@ const App = () => {
             <div className={`grid gap-6 ${isPivotDrawerOpen ? 'lg:grid-cols-[1fr_360px]' : 'grid-cols-1'}`}>
               <div className="min-w-0">
                 {pivotValues.length === 0 ? (
-                  <div className="h-80 flex flex-col items-center justify-center border-2 border-dashed border-slate-800 rounded-[32px] bg-slate-800/30 text-center px-6">
-                    <div className="w-14 h-14 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mb-4">
-                      <TableIcon size={24} className="text-indigo-400" />
+                  <div className={isBright ? 'h-80 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50 text-center px-6' : 'h-80 flex flex-col items-center justify-center border-2 border-dashed border-slate-700 rounded-[32px] bg-slate-800/30 text-center px-6'}>
+                    <div className={isBright ? 'w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center mb-4' : 'w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center mb-4'}>
+                      <TableIcon size={24} className={isBright ? 'text-blue-600' : 'text-indigo-400'} />
                     </div>
-                    <p className="text-slate-300 font-black text-sm mb-2">请先配置透视字段</p>
-                    <p className="text-slate-500 text-xs">添加 行 / 列 / 值 字段后即可生成透视结果</p>
-                    <button onClick={() => setIsPivotDrawerOpen(true)} className="mt-4 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-700 transition">打开字段配置</button>
+                    <p className={isBright ? 'text-slate-700 font-black text-sm mb-2' : 'text-slate-300 font-black text-sm mb-2'}>请先配置透视字段</p>
+                    <p className={isBright ? 'text-slate-500 text-xs' : 'text-slate-500 text-xs'}>添加 行 / 列 / 值 字段后即可生成透视结果</p>
+                    <button onClick={() => setIsPivotDrawerOpen(true)} className={isBright ? 'mt-4 px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-black hover:bg-blue-500 transition cursor-pointer' : 'mt-4 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-700 transition'}>打开字段配置</button>
                   </div>
                 ) : (
                   <div className="overflow-x-auto custom-scrollbar no-scrollbar-at-small pb-4">
@@ -3798,18 +3814,18 @@ const App = () => {
                             <>
                               <tr>
                                 {(pivotResult?.rowDims.length ? pivotResult.rowDims : ['维度']).map((h, idx) => (
-                                  <th key={idx} rowSpan={rowSpan} className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-900/50 sticky left-0 z-20 min-w-[140px]">
+                                  <th key={idx} rowSpan={rowSpan} className={`px-4 py-3 text-[10px] font-black uppercase tracking-widest sticky left-0 z-20 min-w-[140px] ${isBright ? 'text-slate-600 bg-slate-100' : 'text-slate-300 bg-slate-800/80'}`}>
                                     {h}
                                   </th>
                                 ))}
                                 {collapseHeader ? (
                                   pivotResult.colKeys.flatMap((colKey: string) =>
                                     colKey === '__grand_total__'
-                                      ? [<th key="gt" colSpan={pivotResult.valueKeys.length} className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">总计</th>]
+                                      ? [<th key="gt" colSpan={pivotResult.valueKeys.length} className={`px-4 py-3 text-[10px] font-black uppercase tracking-widest text-center ${isBright ? 'text-slate-600 bg-slate-100' : 'text-slate-400 bg-slate-800/80'}`}>总计</th>]
                                       : pivotResult.valueKeys.map(vk => (
                                           <th
                                             key={vk}
-                                            className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right whitespace-nowrap cursor-pointer hover:bg-slate-700/50 select-none"
+                                            className={`px-4 py-3 text-[10px] font-black uppercase tracking-widest text-right whitespace-nowrap cursor-pointer select-none ${isBright ? 'text-slate-600 bg-slate-100 hover:bg-slate-200' : 'text-slate-400 hover:bg-slate-700/50'}`}
                                             onClick={() => setPivotSort(prev => prev?.colKey === colKey && prev?.valueKey === vk && prev.dir === 'asc' ? { colKey, valueKey: vk, dir: 'desc' } : { colKey, valueKey: vk, dir: 'asc' })}
                                           >
                                             <span className="inline-flex items-center gap-1 justify-end w-full">
@@ -3824,7 +3840,7 @@ const App = () => {
                                     pivotResult.valueKeys.length === 1 ? (
                                       <th
                                         key={colKey}
-                                        className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center cursor-pointer hover:bg-slate-700/50 select-none"
+                                        className={`px-4 py-3 text-[10px] font-black uppercase tracking-widest text-center cursor-pointer select-none ${isBright ? 'text-slate-600 bg-slate-100 hover:bg-slate-200' : 'text-slate-400 hover:bg-slate-700/50'}`}
                                         onClick={() => {
                                           const vk = pivotResult.valueKeys[0];
                                           setPivotSort(prev => prev?.colKey === colKey && prev?.valueKey === vk && prev.dir === 'asc' ? { colKey, valueKey: vk, dir: 'desc' } : { colKey, valueKey: vk, dir: 'asc' });
@@ -3838,7 +3854,7 @@ const App = () => {
                                         </span>
                                       </th>
                                     ) : (
-                                      <th key={colKey} colSpan={pivotResult.valueKeys.length} className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
+                                      <th key={colKey} colSpan={pivotResult.valueKeys.length} className={`px-4 py-3 text-[10px] font-black uppercase tracking-widest text-center ${isBright ? 'text-slate-600 bg-slate-100' : 'text-slate-400 bg-slate-800/80'}`}>
                                         {pivotResult.colLabels[colKey]}
                                       </th>
                                     )
@@ -3851,7 +3867,7 @@ const App = () => {
                                     pivotResult.valueKeys.map(vk => (
                                       <th
                                         key={`${colKey}-${vk}`}
-                                        className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right whitespace-nowrap cursor-pointer hover:bg-slate-700/50 select-none"
+                                        className={`px-4 py-3 text-[10px] font-black uppercase tracking-widest text-right whitespace-nowrap cursor-pointer select-none ${isBright ? 'text-slate-600 bg-slate-100 hover:bg-slate-200' : 'text-slate-500 hover:bg-slate-700/50'}`}
                                         onClick={() => setPivotSort(prev => prev?.colKey === colKey && prev?.valueKey === vk && prev.dir === 'asc' ? { colKey, valueKey: vk, dir: 'desc' } : { colKey, valueKey: vk, dir: 'asc' })}
                                       >
                                         <span className="inline-flex items-center gap-1 justify-end w-full">
@@ -3884,15 +3900,28 @@ const App = () => {
                               lastRowLabels = [];
                             }
                             return (
-                              <tr key={row.key + idx} className={`border border-transparent ${isGrand ? 'bg-indigo-900/20' : isSubtotal ? 'bg-slate-800/60' : 'bg-slate-800/40'} rounded-3xl`}>
+                              <tr
+                                key={row.key + idx}
+                                className={
+                                  isBright
+                                    ? `border border-transparent rounded-xl ${isGrand ? 'bg-blue-50' : isSubtotal ? 'bg-slate-100' : 'bg-white'}`
+                                    : `border border-transparent ${isGrand ? 'bg-indigo-900/20' : isSubtotal ? 'bg-slate-700/50' : 'bg-slate-800/40'} rounded-3xl`
+                                }
+                              >
                                 {(pivotResult.rowDims.length ? pivotResult.rowDims : ['维度']).map((_, i) => (
-                                  <td key={i} className={`px-4 py-3 text-xs font-black ${isGrand ? 'text-indigo-300' : isSubtotal ? 'text-slate-200' : 'text-white'} sticky left-0 bg-inherit z-10`}>
+                                  <td
+                                    key={i}
+                                    className={`px-4 py-3 text-xs font-black sticky left-0 bg-inherit z-10 ${isBright ? (isGrand ? 'text-blue-800' : isSubtotal ? 'text-slate-700' : 'text-slate-900') : (isGrand ? 'text-indigo-300' : isSubtotal ? 'text-slate-200' : 'text-white')}`}
+                                  >
                                     {(!displayCells[i] || displayCells[i] === 'N/A' || displayCells[i].toUpperCase() === 'NULL') ? '' : displayCells[i]}
                                   </td>
                                 ))}
                                 {pivotResult.colKeys.map(colKey => (
                                   pivotResult.valueKeys.map(vk => (
-                                    <td key={`${row.key}-${colKey}-${vk}`} className={`px-4 py-3 text-right text-xs ${isGrand ? 'text-indigo-200 font-black' : isSubtotal ? 'text-slate-200 font-black' : 'text-slate-300 font-bold'}`}>
+                                    <td
+                                      key={`${row.key}-${colKey}-${vk}`}
+                                      className={`px-4 py-3 text-right text-xs font-bold ${isBright ? (isGrand ? 'text-blue-700' : isSubtotal ? 'text-slate-700' : 'text-slate-600') : (isGrand ? 'text-indigo-200' : isSubtotal ? 'text-slate-200' : 'text-slate-300')}`}
+                                    >
                                       {formatPivotValue(row.cells[colKey]?.[vk] ?? null, vk)}
                                     </td>
                                   ))
@@ -3908,13 +3937,13 @@ const App = () => {
               </div>
 
               {isPivotDrawerOpen && (
-                <div className="bg-slate-900/70 border border-slate-800 rounded-[32px] p-4 space-y-6">
+                <div className={isBright ? 'bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-6' : 'bg-slate-800/80 border border-slate-700 rounded-[32px] p-4 space-y-6'}>
                   <div>
                     <div className="flex items-center justify-between mb-3">
-                      <div className="text-[11px] font-black uppercase tracking-widest text-slate-400">平台范围</div>
+                      <div className={`text-[11px] font-black uppercase tracking-widest ${isBright ? 'text-slate-600' : 'text-slate-400'}`}>平台范围</div>
                       <button
                         onClick={togglePivotPlatformAll}
-                        className="text-[10px] font-black text-slate-400 hover:text-slate-200 transition"
+                        className={`text-[10px] font-black transition cursor-pointer ${isBright ? 'text-slate-500 hover:text-blue-600' : 'text-slate-400 hover:text-slate-200'}`}
                       >
                         {pivotPlatformScopes.filter(k => allowedPlatformsForSegment.includes(k)).length === allowedPlatformsForSegment.length ? '清空' : '全选'}
                       </button>
@@ -3924,7 +3953,7 @@ const App = () => {
                         const active = pivotPlatformScopes.includes(opt.key);
                         const disabled = !allowedPlatformsForSegment.includes(opt.key);
                         return (
-                          <label key={opt.key} className={`flex items-center gap-2 text-xs ${disabled ? 'text-slate-600 cursor-not-allowed' : 'text-slate-200'}`}>
+                          <label key={opt.key} className={`flex items-center gap-2 text-xs ${disabled ? 'text-slate-400 cursor-not-allowed' : isBright ? 'text-slate-700' : 'text-slate-200'}`}>
                             <input
                               type="checkbox"
                               checked={active}
@@ -3943,12 +3972,12 @@ const App = () => {
 
                   {/* Segment 数据层级 */}
                   <div>
-                    <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">Segment 数据层级</div>
+                    <div className={`text-[11px] font-black uppercase tracking-widest mb-3 ${isBright ? 'text-slate-600' : 'text-slate-400'}`}>Segment 数据层级</div>
                     <div className="space-y-2">
                       {PIVOT_SEGMENT_MODE_OPTIONS.map(opt => {
                         const active = pivotSegmentMode === opt.key;
                         return (
-                          <label key={opt.key} className="flex items-center gap-2 text-xs text-slate-200">
+                          <label key={opt.key} className={`flex items-center gap-2 text-xs ${isBright ? 'text-slate-700' : 'text-slate-200'}`}>
                             <input
                               type="radio"
                               name="pivotSegmentMode"
@@ -3972,12 +4001,12 @@ const App = () => {
                   </div>
 
                   <div>
-                    <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">筛选器</div>
+                    <div className={`text-[11px] font-black uppercase tracking-widest mb-3 ${isBright ? 'text-slate-600' : 'text-slate-400'}`}>筛选器</div>
                     {pivotFilterGroups.length > 1 && (
                       <div className="flex items-center gap-2 mb-3">
-                        <span className="text-[10px] text-slate-500">组间逻辑</span>
+                        <span className={`text-[10px] ${isBright ? 'text-slate-500' : 'text-slate-500'}`}>组间逻辑</span>
                         <select
-                          className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white"
+                          className={isBright ? 'bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[11px] text-slate-900' : 'bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white'}
                           value={pivotFilterGroupLogic}
                           onChange={e => setPivotFilterGroupLogic(e.target.value as 'and' | 'or')}
                         >
@@ -3987,7 +4016,7 @@ const App = () => {
                       </div>
                     )}
                     <select
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mb-3"
+                      className={isBright ? 'w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 mb-3' : 'w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mb-3'}
                       onChange={e => {
                         handleAddPivotFilter(e.target.value);
                         e.currentTarget.value = '';
@@ -4252,60 +4281,116 @@ const App = () => {
     </div>
   );
 
+  const isBright = uiMode === 'bright-minimal';
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-indigo-500/30">
+    <div
+      className={
+        isBright
+          ? 'min-h-screen bg-slate-50 text-blue-900 font-sans selection:bg-blue-200 transition-colors duration-200'
+          : 'min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-indigo-500/30'
+      }
+    >
 
       {/* 全屏加载页：仅点击「获取广告数据」时显示，选项目/拉配置不显示 */}
       {isFetchingAdData && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/98 backdrop-blur-md animate-in fade-in duration-200">
+        <div
+          className={
+            isBright
+              ? 'fixed inset-0 z-[9999] flex items-center justify-center bg-slate-50/98 backdrop-blur-md animate-in fade-in duration-200'
+              : 'fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/98 backdrop-blur-md animate-in fade-in duration-200'
+          }
+        >
           <div className="flex flex-col items-center justify-center gap-8 max-w-md mx-4">
-            <div className="w-24 h-24 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-2xl shadow-indigo-900/20 flex items-center justify-center relative overflow-hidden">
+            <div
+              className={
+                isBright
+                  ? 'w-24 h-24 rounded-3xl bg-white border border-slate-200 shadow-xl flex items-center justify-center relative overflow-hidden'
+                  : 'w-24 h-24 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-2xl shadow-indigo-900/20 flex items-center justify-center relative overflow-hidden'
+              }
+            >
               <div className="absolute inset-0 bg-gradient-to-br from-blue-600/20 to-indigo-600/20" />
-              <RefreshCcw className="w-12 h-12 text-indigo-400 animate-spin relative z-10" />
+              <RefreshCcw className={`w-12 h-12 animate-spin relative z-10 ${isBright ? 'text-blue-600' : 'text-indigo-400'}`} />
             </div>
             <div className="text-center space-y-2">
-              <h2 className="text-xl font-black text-white">正在获取广告数据</h2>
-              <p className="text-slate-400 text-sm font-medium">同时拉取 Facebook 与 Google 平台数据，请稍候…</p>
+              <h2 className={`text-xl font-black ${isBright ? 'text-blue-900' : 'text-white'}`}>正在获取广告数据</h2>
+              <p className={isBright ? 'text-slate-600 text-sm font-medium' : 'text-slate-400 text-sm font-medium'}>同时拉取 Facebook 与 Google 平台数据，请稍候…</p>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-              <div className="w-2 h-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '150ms' }} />
-              <div className="w-2 h-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+              <div className={`w-2 h-2 rounded-full animate-bounce ${isBright ? 'bg-blue-600' : 'bg-indigo-500'}`} style={{ animationDelay: '0ms' }} />
+              <div className={`w-2 h-2 rounded-full animate-bounce ${isBright ? 'bg-blue-600' : 'bg-indigo-500'}`} style={{ animationDelay: '150ms' }} />
+              <div className={`w-2 h-2 rounded-full animate-bounce ${isBright ? 'bg-blue-600' : 'bg-indigo-500'}`} style={{ animationDelay: '300ms' }} />
             </div>
           </div>
         </div>
       )}
 
       {/* --- Top Navigation Bar --- */}
-      <header className="sticky top-0 z-40 bg-slate-900/80 backdrop-blur-md border-b border-slate-800">
+      <header
+        className={
+          isBright
+            ? 'sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-sm transition-colors duration-200'
+            : 'sticky top-0 z-40 bg-slate-900/80 backdrop-blur-md border-b border-slate-800'
+        }
+      >
         <div className="max-w-[1600px] mx-auto px-4 h-16 flex items-center justify-between">
 
           {/* Left: Logo & Title */}
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/20">
+            <div
+              className={
+                isBright
+                  ? 'w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-md'
+                  : 'w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/20'
+              }
+            >
               <BarChart3 className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
-                AdIntel <span className="font-light text-slate-500">Growth Scientist</span>
+              <h1 className={`text-lg font-bold font-heading ${isBright ? 'text-blue-900' : 'bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400'}`}>
+                AdIntel <span className={isBright ? 'font-light text-slate-600' : 'font-light text-slate-500'}>Growth Scientist</span>
               </h1>
             </div>
           </div>
 
           {/* Right: Actions */}
           <div className="flex items-center gap-4">
+            {/* UI 模式切换：日光 / 夜晚 */}
+            <div className="flex items-center gap-0.5 rounded-xl border overflow-hidden" role="group" aria-label="UI 模式">
+              <button
+                type="button"
+                onClick={() => setUiMode('bright-minimal')}
+                className={`flex items-center justify-center w-11 h-10 transition-all duration-200 cursor-pointer ${isBright ? 'bg-blue-600 text-white' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700 hover:text-slate-200 border-r border-slate-700'}`}
+                title="日光模式"
+                aria-label="日光模式"
+              >
+                <Sun className="w-5 h-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setUiMode('default')}
+                className={`flex items-center justify-center w-11 h-10 transition-all duration-200 cursor-pointer ${isBright ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border-l border-slate-200' : 'bg-slate-800 text-white border-l border-slate-700'}`}
+                title="夜晚模式"
+                aria-label="夜晚模式"
+              >
+                <Moon className="w-5 h-5" />
+              </button>
+            </div>
             {/* Edit Config Button (Visible in Dashboard Step) */}
             {step === 'dashboard' && (
               <button
                 onClick={() => setStep('mapping')}
-                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-5 py-2.5 rounded-xl text-xs font-black transition-all shadow-sm active:scale-95 mr-2"
+                className={
+                  isBright
+                    ? 'flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 px-5 py-2.5 rounded-xl text-xs font-black transition-all shadow-sm active:scale-95 mr-2 cursor-pointer'
+                    : 'flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-5 py-2.5 rounded-xl text-xs font-black transition-all shadow-sm active:scale-95 mr-2'
+                }
               >
                 <Settings2 size={14} />
                 调整指标配置
               </button>
             )}
 
-            {/* Save Config Button (Visible in Mapping Step) */}
             {/* Save Config Button (Visible in Mapping Step) */}
             {step === 'mapping' && (
               <button
@@ -4318,21 +4403,21 @@ const App = () => {
               </button>
             )}
             {/* User Profile & Logout */}
-            <div className="flex items-center gap-3 pl-4 border-l border-slate-800">
+            <div className={`flex items-center gap-3 pl-4 border-l ${isBright ? 'border-slate-200' : 'border-slate-800'}`}>
               <div className="flex flex-col items-end">
-                <span className="text-sm font-medium text-slate-200">
+                <span className={isBright ? 'text-sm font-medium text-slate-700' : 'text-sm font-medium text-slate-200'}>
                   {currentUser?.displayName || 'User'}
                 </span>
-                <span className="text-xs text-slate-500">
+                <span className={isBright ? 'text-xs text-slate-500' : 'text-xs text-slate-500'}>
                   {currentUser?.username || ''}
                 </span>
               </div>
-              <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center">
-                <User className="w-4 h-4 text-slate-400" />
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isBright ? 'bg-slate-100 border border-slate-200' : 'bg-slate-800 border border-slate-700'}`}>
+                <User className={isBright ? 'w-4 h-4 text-slate-600' : 'w-4 h-4 text-slate-400'} />
               </div>
               <button
                 onClick={handleLogout}
-                className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
+                className={`p-2 rounded-lg transition-colors cursor-pointer ${isBright ? 'hover:bg-slate-100 text-slate-500 hover:text-red-500' : 'hover:bg-slate-800 text-slate-400 hover:text-red-400'}`}
                 title="登出"
               >
                 <LogOut className="w-4 h-4" />
@@ -4348,23 +4433,33 @@ const App = () => {
         {/* Project Selection Hero */}
         {!selectedProject ? (
           <div className="flex flex-col items-center justify-center py-20 animate-in fade-in zoom-in duration-500">
-            <div className="w-20 h-20 bg-slate-900 rounded-3xl flex items-center justify-center mb-8 border border-slate-800 shadow-2xl shadow-indigo-900/20 relative group">
+            <div
+              className={
+                isBright
+                  ? 'w-20 h-20 bg-white rounded-3xl flex items-center justify-center mb-8 border border-slate-200 shadow-lg relative group'
+                  : 'w-20 h-20 bg-slate-900 rounded-3xl flex items-center justify-center mb-8 border border-slate-800 shadow-2xl shadow-indigo-900/20 relative group'
+              }
+            >
               <div className="absolute inset-0 bg-indigo-500/20 blur-xl rounded-full group-hover:bg-indigo-500/30 transition-all duration-500"></div>
-              <Layers className="w-10 h-10 text-indigo-400 relative z-10" />
+              <Layers className={`w-10 h-10 relative z-10 ${isBright ? 'text-blue-600' : 'text-indigo-400'}`} />
             </div>
-            <h2 className="text-3xl font-bold text-white mb-3 text-center">Select a Project</h2>
-            <p className="text-slate-400 mb-8 text-center max-w-md">
+            <h2 className={`text-3xl font-bold mb-3 text-center font-heading ${isBright ? 'text-blue-900' : 'text-white'}`}>Select a Project</h2>
+            <p className={isBright ? 'text-slate-600 mb-8 text-center max-w-md' : 'text-slate-400 mb-8 text-center max-w-md'}>
               Choose a project to access its Growth Scientist report and AI diagnostics.
             </p>
 
             <div className="relative w-full max-w-md">
               <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
-                <Filter className="w-5 h-5 text-slate-500" />
+                <Filter className={isBright ? 'w-5 h-5 text-slate-500' : 'w-5 h-5 text-slate-500'} />
               </div>
               <input
                 type="text"
                 placeholder="Search projects..."
-                className="w-full pl-10 pr-4 py-3 bg-slate-900/50 border border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none transition-all placeholder-slate-600 text-white"
+                className={
+                  isBright
+                    ? 'w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition-all duration-200 placeholder-slate-400 text-slate-900 shadow-sm'
+                    : 'w-full pl-10 pr-4 py-3 bg-slate-900/50 border border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none transition-all placeholder-slate-600 text-white'
+                }
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
               />
@@ -4377,32 +4472,41 @@ const App = () => {
                   <button
                     key={project.projectId}
                     onClick={() => handleProjectSelect(project)}
-                    className="group flex items-start gap-4 p-4 bg-slate-900/50 hover:bg-slate-800 border border-slate-800 hover:border-indigo-500/50 rounded-2xl transition-all duration-300 hover:shadow-lg hover:shadow-indigo-900/10 text-left relative overflow-hidden"
+                    className={
+                      isBright
+                        ? 'group flex items-start gap-4 p-4 bg-white hover:bg-slate-50 border border-slate-200 hover:border-blue-400 rounded-2xl transition-all duration-200 hover:shadow-md text-left relative overflow-hidden cursor-pointer'
+                        : 'group flex items-start gap-4 p-4 bg-slate-900/50 hover:bg-slate-800 border border-slate-800 hover:border-indigo-500/50 rounded-2xl transition-all duration-300 hover:shadow-lg hover:shadow-indigo-900/10 text-left relative overflow-hidden'
+                    }
                   >
                     <div className="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <ArrowRight className="w-4 h-4 text-indigo-400" />
+                      <ArrowRight className={`w-4 h-4 ${isBright ? 'text-blue-600' : 'text-indigo-400'}`} />
                     </div>
 
-                    <div className="w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform duration-300">
+                    <div
+                      className={
+                        isBright
+                          ? 'w-12 h-12 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform duration-300'
+                          : 'w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform duration-300'
+                      }
+                    >
                       {project.iconUrl ? (
                         <img src={project.iconUrl} alt={project.projectName} className="w-8 h-8 object-contain" />
                       ) : (
-                        <span className="text-xl font-bold text-slate-700 group-hover:text-indigo-500 transition-colors">
+                        <span className={`text-xl font-bold transition-colors ${isBright ? 'text-slate-600 group-hover:text-blue-600' : 'text-slate-700 group-hover:text-indigo-500'}`}>
                           {project.projectName.charAt(0)}
                         </span>
                       )}
                     </div>
                     <div>
-                      <div className="font-semibold text-slate-200 group-hover:text-white mb-1 pr-6">
+                      <div className={`font-semibold mb-1 pr-6 ${isBright ? 'text-slate-800 group-hover:text-blue-900' : 'text-slate-200 group-hover:text-white'}`}>
                         {project.projectName}
                       </div>
                       <div className="flex items-center gap-2">
-                        {/* Tags for reports */}
                         {project.adsCostReport && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Ads Report</span>
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">Ads Report</span>
                         )}
                         {project.biReport && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20">BI Report</span>
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-600 border border-blue-500/20">BI Report</span>
                         )}
                       </div>
                     </div>
@@ -4418,10 +4522,10 @@ const App = () => {
             )}
 
             {isLoadingProjects && (
-              <div className="mt-10 flex items-center gap-2 text-indigo-400 animate-pulse">
-                <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '300ms' }}></div>
+              <div className={`mt-10 flex items-center gap-2 animate-pulse ${isBright ? 'text-blue-600' : 'text-indigo-400'}`}>
+                <div className={`w-2 h-2 rounded-full animate-bounce ${isBright ? 'bg-blue-600' : 'bg-indigo-400'}`} style={{ animationDelay: '0ms' }}></div>
+                <div className={`w-2 h-2 rounded-full animate-bounce ${isBright ? 'bg-blue-600' : 'bg-indigo-400'}`} style={{ animationDelay: '150ms' }}></div>
+                <div className={`w-2 h-2 rounded-full animate-bounce ${isBright ? 'bg-blue-600' : 'bg-indigo-400'}`} style={{ animationDelay: '300ms' }}></div>
               </div>
             )}
           </div>
@@ -4429,25 +4533,31 @@ const App = () => {
           /* --- Report View --- */
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* 吸顶：项目信息 + 时间范围选择 */}
-            <div className="sticky top-16 z-30 -mx-4 px-4 py-4 mb-6 bg-slate-950/95 backdrop-blur-md border-b border-slate-800">
+            <div
+              className={
+                isBright
+                  ? 'sticky top-16 z-30 -mx-4 px-4 py-4 mb-6 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-sm'
+                  : 'sticky top-16 z-30 -mx-4 px-4 py-4 mb-6 bg-slate-950/95 backdrop-blur-md border-b border-slate-800'
+              }
+            >
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-4 flex-wrap">
                   <button
                     onClick={() => setSelectedProject(null)}
-                    className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors group shrink-0"
+                    className={`flex items-center gap-2 text-sm transition-colors group shrink-0 cursor-pointer ${isBright ? 'text-slate-600 hover:text-blue-900' : 'text-slate-400 hover:text-white'}`}
                   >
                     <ArrowRight className="w-4 h-4 rotate-180 group-hover:-translate-x-1 transition-transform" />
                     Back to Projects
                   </button>
-                  <div className="flex items-center gap-3 border-l border-slate-800 pl-4">
+                  <div className={`flex items-center gap-3 border-l pl-4 ${isBright ? 'border-slate-200' : 'border-slate-800'}`}>
                     {selectedProject.iconUrl && <img src={selectedProject.iconUrl} className="w-8 h-8 rounded-lg" alt="" />}
                     <div>
-                      <h2 className="text-xl font-bold text-white">{selectedProject.projectName}</h2>
-                      <p className="text-slate-400 text-xs mt-0.5">Growth Scientist Analysis Report</p>
+                      <h2 className={`text-xl font-bold font-heading ${isBright ? 'text-blue-900' : 'text-white'}`}>{selectedProject.projectName}</h2>
+                      <p className={isBright ? 'text-slate-500 text-xs mt-0.5' : 'text-slate-400 text-xs mt-0.5'}>Growth Scientist Analysis Report</p>
                       {activeReportTab === 'pivot' && (
                         <p className="text-slate-500 text-[11px] mt-1.5 flex items-center gap-1.5">
                           <span>当前报告：</span>
-                          <span className={`tracking-normal ${activePivotPresetId ? 'text-indigo-400 font-semibold' : 'text-slate-500'}`}>
+                          <span className={`tracking-normal ${activePivotPresetId ? (isBright ? 'text-blue-600 font-semibold' : 'text-indigo-400 font-semibold') : 'text-slate-500'}`}>
                             {activePivotPresetId
                               ? (pivotPresets.find(p => p.id === activePivotPresetId)?.name ?? '未知')
                               : '未选择'}
@@ -4459,7 +4569,7 @@ const App = () => {
                 </div>
 
                 {/* 顶层 Tab：数据分析 / 报告定时任务 */}
-                <div className="flex items-center gap-1 bg-slate-900/50 p-1 rounded-xl border border-slate-800">
+                <div className={isBright ? 'flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200' : 'flex items-center gap-1 bg-slate-900/50 p-1 rounded-xl border border-slate-800'}>
                   {[
                     { id: 'analysis' as const, label: '数据分析', icon: BarChart3 },
                     { id: 'scheduled' as const, label: '报告定时任务', icon: Clock },
@@ -4468,7 +4578,7 @@ const App = () => {
                     <button
                       key={id}
                       onClick={() => setProjectMainTab(id)}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${projectMainTab === id ? 'bg-slate-800 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all cursor-pointer ${projectMainTab === id ? (isBright ? 'bg-white text-blue-900 shadow border border-slate-200' : 'bg-slate-700 text-white shadow') : (isBright ? 'text-slate-600 hover:text-blue-800 hover:bg-slate-50' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800')}`}
                     >
                       <Icon className="w-4 h-4" />
                       {label}
@@ -4481,7 +4591,7 @@ const App = () => {
               {projectMainTab === 'analysis' && (
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mt-3">
                 <div />
-                <div className="flex flex-wrap items-center gap-3 bg-slate-900/50 p-1.5 rounded-xl border border-slate-800">
+                <div className={isBright ? 'flex flex-wrap items-center gap-3 bg-slate-100 p-1.5 rounded-xl border border-slate-200' : 'flex flex-wrap items-center gap-3 bg-slate-900/50 p-1.5 rounded-xl border border-slate-800'}>
                   {/* 报告时间范围：仅在首次获取数据的时间范围内可选 */}
                   {(() => {
                     const bounds = reportDateRangeBounds ?? (availableDates.length
@@ -4489,9 +4599,9 @@ const App = () => {
                       : null);
                     if (!bounds) {
                       return (
-                        <div className="flex items-center gap-2 px-3 py-2 bg-slate-800 rounded-lg border border-slate-700">
-                          <Calendar className="w-4 h-4 text-slate-400" />
-                          <span className="text-sm text-slate-500">请先获取数据以选择报告时间范围</span>
+                        <div className={isBright ? 'flex items-center gap-2 px-3 py-2 bg-slate-100 rounded-lg border border-slate-200' : 'flex items-center gap-2 px-3 py-2 bg-slate-800 rounded-lg border border-slate-700'}>
+                          <Calendar className={isBright ? 'w-4 h-4 text-slate-500' : 'w-4 h-4 text-slate-400'} />
+                          <span className={isBright ? 'text-sm text-slate-600' : 'text-sm text-slate-500'}>请先获取数据以选择报告时间范围</span>
                         </div>
                       );
                     }
@@ -4499,9 +4609,9 @@ const App = () => {
                     const endVal = dateRange.end || bounds.end;
                     return (
                       <div className="flex items-center gap-2 flex-wrap">
-                        <div className="flex items-center gap-2 px-2 py-1.5 bg-slate-800 rounded-lg border border-slate-700">
-                          <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
-                          <label className="text-[10px] text-slate-500 uppercase tracking-wider shrink-0">开始</label>
+                        <div className={isBright ? 'flex items-center gap-2 px-2 py-1.5 bg-white rounded-lg border border-slate-200 shadow-sm' : 'flex items-center gap-2 px-2 py-1.5 bg-slate-800 rounded-lg border border-slate-700'}>
+                          <Calendar className={isBright ? 'w-4 h-4 text-slate-500 shrink-0' : 'w-4 h-4 text-slate-400 shrink-0'} />
+                          <label className={`text-[10px] uppercase tracking-wider shrink-0 ${isBright ? 'text-slate-600' : 'text-slate-500'}`}>开始</label>
                           <input
                             type="date"
                             value={startVal}
@@ -4514,12 +4624,12 @@ const App = () => {
                                 return { ...prev, start: v, end: v > end ? v : end };
                               });
                             }}
-                            className="bg-transparent text-sm font-medium text-white outline-none focus:ring-0 border-0 p-0 min-w-0"
+                            className={isBright ? 'bg-transparent text-sm font-medium text-slate-900 outline-none focus:ring-0 border-0 p-0 min-w-0' : 'bg-transparent text-sm font-medium text-white outline-none focus:ring-0 border-0 p-0 min-w-0'}
                           />
                         </div>
-                        <ArrowRight className="w-3 h-3 text-slate-600 shrink-0" />
-                        <div className="flex items-center gap-2 px-2 py-1.5 bg-slate-800 rounded-lg border border-slate-700">
-                          <label className="text-[10px] text-slate-500 uppercase tracking-wider shrink-0">结束</label>
+                        <ArrowRight className={`w-3 h-3 shrink-0 ${isBright ? 'text-slate-400' : 'text-slate-600'}`} />
+                        <div className={isBright ? 'flex items-center gap-2 px-2 py-1.5 bg-white rounded-lg border border-slate-200 shadow-sm' : 'flex items-center gap-2 px-2 py-1.5 bg-slate-800 rounded-lg border border-slate-700'}>
+                          <label className={`text-[10px] uppercase tracking-wider shrink-0 ${isBright ? 'text-slate-600' : 'text-slate-500'}`}>结束</label>
                           <input
                             type="date"
                             value={endVal}
@@ -4532,10 +4642,10 @@ const App = () => {
                                 return { ...prev, end: v, start: v < start ? v : start };
                               });
                             }}
-                            className="bg-transparent text-sm font-medium text-white outline-none focus:ring-0 border-0 p-0 min-w-0"
+                            className={isBright ? 'bg-transparent text-sm font-medium text-slate-900 outline-none focus:ring-0 border-0 p-0 min-w-0' : 'bg-transparent text-sm font-medium text-white outline-none focus:ring-0 border-0 p-0 min-w-0'}
                           />
                         </div>
-                        <span className="text-[10px] text-slate-500">（可选范围 {bounds.start} ~ {bounds.end}）</span>
+                        <span className={`text-[10px] ${isBright ? 'text-slate-500' : 'text-slate-500'}`}>（可选范围 {bounds.start} ~ {bounds.end}）</span>
                       </div>
                     );
                   })()}
@@ -4555,8 +4665,8 @@ const App = () => {
               )}
               {/* Tab 栏：仅在 数据分析 Tab + dashboard 步骤显示 */}
               {projectMainTab === 'analysis' && step === 'dashboard' && (
-                <div className="flex items-center gap-1.5 mt-4 pt-4 border-t border-slate-800">
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mr-2">模块</span>
+                <div className={`flex items-center gap-1.5 mt-4 pt-4 border-t ${isBright ? 'border-slate-200' : 'border-slate-800'}`}>
+                  <span className={`text-[10px] font-black uppercase tracking-widest mr-2 ${isBright ? 'text-slate-500' : 'text-slate-500'}`}>模块</span>
                   {[
                     { id: 'bi' as const, label: 'BI 看板', icon: LayoutDashboard },
                     { id: 'pivot' as const, label: '数据透视分析', icon: TableIcon },
@@ -4565,7 +4675,7 @@ const App = () => {
                     <button
                       key={id}
                       onClick={() => setActiveReportTab(id)}
-                      className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${activeReportTab === id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}
+                      className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer ${activeReportTab === id ? (isBright ? 'bg-blue-600 text-white shadow-md' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30') : (isBright ? 'text-slate-600 hover:text-blue-800 hover:bg-slate-100' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800')}`}
                     >
                       <Icon className="w-4 h-4" />
                       {label}
@@ -4574,7 +4684,7 @@ const App = () => {
                   <div className="ml-auto">
                     <button
                       onClick={() => { setIsRawDataViewerOpen(true); setRawDataPage(0); setRawDataSearch(''); }}
-                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition border border-slate-700"
+                      className={isBright ? 'flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-black hover:bg-slate-200 transition border border-slate-200 cursor-pointer' : 'flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 text-slate-200 text-xs font-black hover:bg-slate-700 transition border border-slate-700'}
                     >
                       <Database className="w-4 h-4" />
                       源数据
@@ -6254,4 +6364,8 @@ const App = () => {
 };
 
 const root = createRoot(document.getElementById('root')!);
-root.render(<App />);
+root.render(
+  <UiModeProvider>
+    <App />
+  </UiModeProvider>
+);
