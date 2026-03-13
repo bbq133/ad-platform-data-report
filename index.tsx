@@ -4883,7 +4883,7 @@ const App = () => {
                         <button
                           key={tab.id}
                           onClick={() => setMappingTab(tab.id)}
-                          className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all ${mappingTab === tab.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}
+                          className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all ${mappingTab === tab.id ? (isBright ? 'bg-indigo-100 text-indigo-900 shadow border border-indigo-200' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30') : (isBright ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-200' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800')}`}
                         >
                           {tab.label}
                         </button>
@@ -4894,7 +4894,7 @@ const App = () => {
                       {mappingTab === 'metrics' && (
                         <button
                           onClick={() => setMappingTab('dimensions')}
-                          className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-500 transition-all shrink-0"
+                          className={isBright ? 'px-4 py-2.5 rounded-xl bg-indigo-100 text-indigo-900 text-xs font-black hover:bg-indigo-200 transition-all shrink-0' : 'px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-500 transition-all shrink-0'}
                         >
                           下一步进入到维度参数配置
                         </button>
@@ -4903,13 +4903,13 @@ const App = () => {
                         <>
                           <button
                             onClick={() => setMappingTab('metrics')}
-                            className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-black hover:bg-slate-700 transition-all shrink-0"
+                            className={isBright ? 'px-4 py-2.5 rounded-xl bg-slate-200 text-slate-700 text-xs font-black hover:bg-slate-300 transition-all shrink-0' : 'px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-black hover:bg-slate-700 transition-all shrink-0'}
                           >
                             返回上一步
                           </button>
                           <button
                             onClick={() => setStep('dashboard')}
-                            className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-500 transition-all shrink-0"
+                            className={isBright ? 'px-4 py-2.5 rounded-xl bg-indigo-100 text-indigo-900 text-xs font-black hover:bg-indigo-200 transition-all shrink-0' : 'px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-500 transition-all shrink-0'}
                           >
                             生成智投分析面板
                           </button>
@@ -4961,14 +4961,14 @@ const App = () => {
                         )}
 
                         {/* Segment 数据层级选择 */}
-                        <div className="flex items-center gap-3 bg-slate-800/60 rounded-2xl px-4 py-3 border border-slate-700/50">
-                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest shrink-0">Segment</span>
+                        <div className={`flex items-center gap-3 rounded-2xl px-4 py-3 ${isBright ? 'bg-slate-100 border border-slate-200' : 'bg-slate-800/60 border border-slate-700/50'}`}>
+                          <span className={`text-[9px] font-black uppercase tracking-widest shrink-0 ${isBright ? 'text-slate-500' : 'text-slate-400'}`}>Segment</span>
                           <div className="flex flex-wrap gap-1.5">
                             {getSegmentOptions(activePlatformTab, activePlatformTab === 'google' ? activeGoogleType : undefined).map(opt => (
                               <button
                                 key={opt.key}
                                 onClick={() => setActiveSegment(opt.key)}
-                                className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all ${activeSegment === opt.key ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}
+                                className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all ${activeSegment === opt.key ? (isBright ? 'bg-indigo-100 text-indigo-900 shadow border border-indigo-200' : 'bg-indigo-600 text-white shadow-md') : (isBright ? 'bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-200 border border-slate-200' : 'bg-slate-900 text-slate-400 hover:text-slate-200')}`}
                               >
                                 {opt.label}
                               </button>
@@ -5151,71 +5151,71 @@ const App = () => {
 
                   {/* Bottom Row: Dimensions */}
                   {mappingTab === 'dimensions' && (
-                    <div className="bg-slate-900/50 border border-slate-800 rounded-[40px] p-10 shadow-2xl space-y-10">
+                    <div className={isBright ? 'bg-slate-100 border border-slate-200 rounded-[40px] p-10 shadow-xl space-y-10' : 'bg-slate-900/50 border border-slate-800 rounded-[40px] p-10 shadow-2xl space-y-10'}>
                       <div className="space-y-5">
                         <div className="flex items-start justify-between gap-4">
                           <div className="space-y-2">
-                            <h3 className="text-2xl font-black flex items-center gap-4 text-white"><Split className="text-purple-400" /> 维度参数配置</h3>
-                            <p className="text-xs text-slate-400 leading-relaxed max-w-2xl">在这里统一配置命名中的字段规范，系统会根据这些字段在报表中自动拆解为筛选维度，方便你按 Age、Country、Gender 等维度分析投放效果。</p>
+                            <h3 className={`text-2xl font-black flex items-center gap-4 ${isBright ? 'text-slate-900' : 'text-white'}`}><Split className={isBright ? 'text-purple-600' : 'text-purple-400'} /> 维度参数配置</h3>
+                            <p className={`text-xs leading-relaxed max-w-2xl ${isBright ? 'text-slate-600' : 'text-slate-400'}`}>在这里统一配置命名中的字段规范，系统会根据这些字段在报表中自动拆解为筛选维度，方便你按 Age、Country、Gender 等维度分析投放效果。</p>
                           </div>
                           <div className="relative group/help shrink-0">
-                            <button className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-800 border border-slate-700 text-slate-400 hover:text-indigo-400 hover:border-indigo-600 transition-all">
+                            <button className={isBright ? 'w-8 h-8 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-500 hover:text-indigo-600 hover:border-indigo-400 transition-all' : 'w-8 h-8 flex items-center justify-center rounded-xl bg-slate-800 border border-slate-700 text-slate-400 hover:text-indigo-400 hover:border-indigo-600 transition-all'}>
                               <HelpCircle size={16} />
                             </button>
-                            <div className="absolute right-0 top-10 z-50 w-80 p-5 bg-slate-800 border border-slate-600 rounded-2xl shadow-2xl shadow-black/40 opacity-0 invisible group-hover/help:opacity-100 group-hover/help:visible transition-all duration-200 pointer-events-none group-hover/help:pointer-events-auto">
-                              <p className="text-[11px] font-bold text-white mb-2">什么是维度参数配置？</p>
-                              <p className="text-[10px] text-slate-300 leading-relaxed mb-3">在这里定义广告系列命名中各个字段的写法（如国家、年龄、性别等）。系统会根据这些设置，从命名里自动拆解出对应维度。</p>
-                              <p className="text-[11px] font-bold text-white mb-1.5">配置后可用于：</p>
-                              <ul className="text-[10px] text-slate-300 leading-relaxed space-y-1">
-                                <li className="flex items-start gap-1.5"><span className="text-purple-400 mt-0.5">•</span>报表中按 Age、Country、Gender 等维度筛选</li>
-                                <li className="flex items-start gap-1.5"><span className="text-purple-400 mt-0.5">•</span>分析不同人群 / 国家的投放效果对比</li>
-                                <li className="flex items-start gap-1.5"><span className="text-purple-400 mt-0.5">•</span>精细化归因与多维数据透视</li>
+                            <div className={`absolute right-0 top-10 z-50 w-80 p-5 rounded-2xl shadow-2xl opacity-0 invisible group-hover/help:opacity-100 group-hover/help:visible transition-all duration-200 pointer-events-none group-hover/help:pointer-events-auto ${isBright ? 'bg-white border border-slate-200 shadow-black/10' : 'bg-slate-800 border border-slate-600 shadow-black/40'}`}>
+                              <p className={`text-[11px] font-bold mb-2 ${isBright ? 'text-slate-900' : 'text-white'}`}>什么是维度参数配置？</p>
+                              <p className={`text-[10px] leading-relaxed mb-3 ${isBright ? 'text-slate-600' : 'text-slate-300'}`}>在这里定义广告系列命名中各个字段的写法（如国家、年龄、性别等）。系统会根据这些设置，从命名里自动拆解出对应维度。</p>
+                              <p className={`text-[11px] font-bold mb-1.5 ${isBright ? 'text-slate-900' : 'text-white'}`}>配置后可用于：</p>
+                              <ul className={`text-[10px] leading-relaxed space-y-1 ${isBright ? 'text-slate-600' : 'text-slate-300'}`}>
+                                <li className="flex items-start gap-1.5"><span className={isBright ? 'text-purple-600 mt-0.5' : 'text-purple-400 mt-0.5'}>•</span>报表中按 Age、Country、Gender 等维度筛选</li>
+                                <li className="flex items-start gap-1.5"><span className={isBright ? 'text-purple-600 mt-0.5' : 'text-purple-400 mt-0.5'}>•</span>分析不同人群 / 国家的投放效果对比</li>
+                                <li className="flex items-start gap-1.5"><span className={isBright ? 'text-purple-600 mt-0.5' : 'text-purple-400 mt-0.5'}>•</span>精细化归因与多维数据透视</li>
                               </ul>
-                              <div className="mt-3 pt-3 border-t border-slate-700">
-                                <p className="text-[10px] text-slate-400"><span className="text-indigo-400 font-bold">建议：</span>先在这里定好统一规范，再按照示例去给广告命名。</p>
+                              <div className={`mt-3 pt-3 border-t ${isBright ? 'border-slate-200' : 'border-slate-700'}`}>
+                                <p className={`text-[10px] ${isBright ? 'text-slate-600' : 'text-slate-400'}`}><span className={isBright ? 'text-indigo-600 font-bold' : 'text-indigo-400 font-bold'}>建议：</span>先在这里定好统一规范，再按照示例去给广告命名。</p>
                               </div>
                             </div>
                           </div>
                         </div>
 
                         {/* 三步流程提示 */}
-                        <div className="flex items-center gap-3 bg-slate-800/60 border border-slate-700/60 rounded-2xl px-5 py-3.5">
+                        <div className={`flex items-center gap-3 rounded-2xl px-5 py-3.5 ${isBright ? 'bg-slate-200/80 border border-slate-200' : 'bg-slate-800/60 border border-slate-700/60'}`}>
                           <div className="flex items-center gap-2.5">
-                            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-indigo-600 text-[9px] font-black text-white shrink-0">1</span>
-                            <span className="text-[10px] font-bold text-slate-300">选择命名中要用的字段</span>
+                            <span className={`flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-black shrink-0 ${isBright ? 'bg-indigo-100 text-indigo-800' : 'bg-indigo-600 text-white'}`}>1</span>
+                            <span className={`text-[10px] font-bold ${isBright ? 'text-slate-700' : 'text-slate-300'}`}>选择命名中要用的字段</span>
                           </div>
-                          <ChevronRight size={14} className="text-slate-600 shrink-0" />
+                          <ChevronRight size={14} className={isBright ? 'text-slate-400 shrink-0' : 'text-slate-600 shrink-0'} />
                           <div className="flex items-center gap-2.5">
-                            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-purple-600 text-[9px] font-black text-white shrink-0">2</span>
-                            <span className="text-[10px] font-bold text-slate-300">为每个字段定义取值规范</span>
+                            <span className={`flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-black shrink-0 ${isBright ? 'bg-purple-100 text-purple-800' : 'bg-purple-600 text-white'}`}>2</span>
+                            <span className={`text-[10px] font-bold ${isBright ? 'text-slate-700' : 'text-slate-300'}`}>为每个字段定义取值规范</span>
                           </div>
-                          <ChevronRight size={14} className="text-slate-600 shrink-0" />
+                          <ChevronRight size={14} className={isBright ? 'text-slate-400 shrink-0' : 'text-slate-600 shrink-0'} />
                           <div className="flex items-center gap-2.5">
-                            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-600 text-[9px] font-black text-white shrink-0">3</span>
-                            <span className="text-[10px] font-bold text-slate-300">报表自动按这些字段拆解维度</span>
+                            <span className={`flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-black shrink-0 ${isBright ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-600 text-white'}`}>3</span>
+                            <span className={`text-[10px] font-bold ${isBright ? 'text-slate-700' : 'text-slate-300'}`}>报表自动按这些字段拆解维度</span>
                           </div>
                         </div>
                       </div>
 
                       {/* 命名预览示例 */}
-                      <div className="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-5 space-y-4">
+                      <div className={`rounded-2xl p-5 space-y-4 ${isBright ? 'bg-white border border-slate-200' : 'bg-slate-800/50 border border-slate-700/60'}`}>
                         <div className="flex items-center gap-2">
-                          <Lightbulb size={14} className="text-amber-400" />
-                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">命名示例 · How It Works</span>
+                          <Lightbulb size={14} className={isBright ? 'text-amber-500' : 'text-amber-400'} />
+                          <span className={`text-[10px] font-black uppercase tracking-widest ${isBright ? 'text-slate-500' : 'text-slate-400'}`}>命名示例 · How It Works</span>
                         </div>
 
                         <div className="space-y-3">
-                          <p className="text-[10px] text-slate-400 leading-relaxed">以 Campaign 命名为例，使用 <span className="text-white font-bold">-</span>（中划线）分隔各字段：</p>
-                          <div className="flex items-end gap-0 flex-wrap bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
+                          <p className={`text-[10px] leading-relaxed ${isBright ? 'text-slate-600' : 'text-slate-400'}`}>以 Campaign 命名为例，使用 <span className={isBright ? 'text-slate-900 font-bold' : 'text-white font-bold'}>-</span>（中划线）分隔各字段：</p>
+                          <div className={`flex items-end gap-0 flex-wrap rounded-xl p-3 ${isBright ? 'bg-slate-100 border border-slate-200' : 'bg-slate-900/60 border border-slate-700/50'}`}>
                             {['GOC', 'GG', 'Brand', 'Lifecycle', 'Competitors', 'CPA', 'Pmax', 'BrandEdge', 'BrandEdge', 'I/V', 'Prospecting', 'CS', 'TR', '20251210'].map((part, i) => {
                               const highlighted = (part === 'TR' || part === 'Lifecycle');
                               const dimLabel = part === 'TR' ? '广告目标' : part === 'Lifecycle' ? '产品型号' : null;
                               return (
                                 <React.Fragment key={i}>
-                                  {i > 0 && <span className="text-slate-500 text-[11px] font-mono mx-0.5 self-end pb-1">-</span>}
-                                  <span className={`inline-flex flex-col items-center rounded-md px-1.5 py-1 ${highlighted ? 'bg-purple-500/15 border border-purple-500/30' : ''}`}>
-                                    {dimLabel && <span className="text-[8px] font-black text-purple-400 leading-none mb-0.5">{dimLabel}</span>}
-                                    <span className={`text-[10px] font-medium leading-none ${highlighted ? 'text-white' : 'text-slate-500'}`}>{part}</span>
+                                  {i > 0 && <span className={`text-[11px] font-mono mx-0.5 self-end pb-1 ${isBright ? 'text-slate-500' : 'text-slate-500'}`}>-</span>}
+                                  <span className={`inline-flex flex-col items-center rounded-md px-1.5 py-1 ${highlighted ? (isBright ? 'bg-purple-100 border border-purple-200' : 'bg-purple-500/15 border border-purple-500/30') : ''}`}>
+                                    {dimLabel && <span className={`text-[8px] font-black leading-none mb-0.5 ${isBright ? 'text-purple-700' : 'text-purple-400'}`}>{dimLabel}</span>}
+                                    <span className={`text-[10px] font-medium leading-none ${highlighted ? (isBright ? 'text-purple-900' : 'text-white') : (isBright ? 'text-slate-600' : 'text-slate-500')}`}>{part}</span>
                                   </span>
                                 </React.Fragment>
                               );
@@ -5223,37 +5223,37 @@ const App = () => {
                           </div>
                           <div className="flex items-start gap-4 mt-1">
                             <div className="flex items-center gap-1.5">
-                              <span className="w-2.5 h-2.5 rounded-sm bg-purple-500/30 border border-purple-500/40 shrink-0" />
-                              <span className="text-[9px] text-slate-400">= 已配置为报表维度的字段（可按此筛选）</span>
+                              <span className={`w-2.5 h-2.5 rounded-sm shrink-0 ${isBright ? 'bg-purple-200 border border-purple-300' : 'bg-purple-500/30 border border-purple-500/40'}`} />
+                              <span className={`text-[9px] ${isBright ? 'text-slate-600' : 'text-slate-400'}`}>= 已配置为报表维度的字段（可按此筛选）</span>
                             </div>
                             <div className="flex items-center gap-1.5">
-                              <span className="w-2.5 h-2.5 rounded-sm bg-slate-800/60 shrink-0" />
-                              <span className="text-[9px] text-slate-400">= 命名中的其他字段</span>
+                              <span className={`w-2.5 h-2.5 rounded-sm shrink-0 ${isBright ? 'bg-slate-300' : 'bg-slate-800/60'}`} />
+                              <span className={`text-[9px] ${isBright ? 'text-slate-600' : 'text-slate-400'}`}>= 命名中的其他字段</span>
                             </div>
                           </div>
                         </div>
 
-                        <div className="border-t border-slate-700/50 pt-3 space-y-1.5">
-                          <p className="text-[10px] text-slate-400 leading-relaxed">在右侧为每个维度选择 <span className="text-white font-bold">来源字段</span>（如 Campaign Naming）、<span className="text-white font-bold">分隔方式</span>（中划线/下划线）和 <span className="text-white font-bold">位置</span>（Part 序号），系统会从命名中自动提取对应字段作为报表维度。</p>
-                          <p className="text-[9px] text-slate-500">例如上方示例：选择来源「Campaign (Naming)」→ 分隔符「- (中划线)」→ Part 12 即可提取 <span className="text-purple-400 font-bold">TR</span> 作为「广告目标」维度。</p>
+                        <div className={`border-t pt-3 space-y-1.5 ${isBright ? 'border-slate-200' : 'border-slate-700/50'}`}>
+                          <p className={`text-[10px] leading-relaxed ${isBright ? 'text-slate-600' : 'text-slate-400'}`}>在右侧为每个维度选择 <span className={isBright ? 'text-slate-900 font-bold' : 'text-white font-bold'}>来源字段</span>（如 Campaign Naming）、<span className={isBright ? 'text-slate-900 font-bold' : 'text-white font-bold'}>分隔方式</span>（中划线/下划线）和 <span className={isBright ? 'text-slate-900 font-bold' : 'text-white font-bold'}>位置</span>（Part 序号），系统会从命名中自动提取对应字段作为报表维度。</p>
+                          <p className={`text-[9px] ${isBright ? 'text-slate-500' : 'text-slate-500'}`}>例如上方示例：选择来源「Campaign (Naming)」→ 分隔符「- (中划线)」→ Part 12 即可提取 <span className={isBright ? 'text-purple-600 font-bold' : 'text-purple-400 font-bold'}>TR</span> 作为「广告目标」维度。</p>
                         </div>
 
                         {/* 直接取值维度 */}
                         {(() => {
                           const directDims = dimConfigs.filter(d => d.index === -1 && !['campaign', 'adSet', 'ad'].includes(d.source)).slice(0, 5);
                           return directDims.length > 0 ? (
-                            <div className="border-t border-slate-700/50 pt-3 space-y-2">
-                              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">独立维度字段（直接取值）</p>
+                            <div className={`border-t pt-3 space-y-2 ${isBright ? 'border-slate-200' : 'border-slate-700/50'}`}>
+                              <p className={`text-[9px] font-bold uppercase tracking-wider ${isBright ? 'text-slate-500' : 'text-slate-500'}`}>独立维度字段（直接取值）</p>
                               <div className="flex items-center gap-2 flex-wrap">
                                 {directDims.map(d => (
-                                  <span key={d.label} className="inline-flex items-center gap-1.5 bg-emerald-950/40 border border-emerald-800/30 rounded-lg px-2.5 py-1.5">
-                                    <span className="text-[9px] font-black text-emerald-400 uppercase">{d.label}</span>
-                                    <span className="text-[10px] text-slate-400">→</span>
-                                    <span className="text-[10px] text-slate-300 font-medium">{(namingSamples as Record<string, string>)[d.source] || `{${d.source}}`}</span>
+                                  <span key={d.label} className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 ${isBright ? 'bg-emerald-100 border border-emerald-200' : 'bg-emerald-950/40 border border-emerald-800/30'}`}>
+                                    <span className={`text-[9px] font-black uppercase ${isBright ? 'text-emerald-800' : 'text-emerald-400'}`}>{d.label}</span>
+                                    <span className={isBright ? 'text-[10px] text-slate-500' : 'text-[10px] text-slate-400'}>→</span>
+                                    <span className={`text-[10px] font-medium ${isBright ? 'text-slate-700' : 'text-slate-300'}`}>{(namingSamples as Record<string, string>)[d.source] || `{${d.source}}`}</span>
                                   </span>
                                 ))}
                               </div>
-                              <p className="text-[9px] text-slate-500">这些维度不需要从命名中拆分，系统会直接从数据列中读取对应值。</p>
+                              <p className={`text-[9px] ${isBright ? 'text-slate-500' : 'text-slate-500'}`}>这些维度不需要从命名中拆分，系统会直接从数据列中读取对应值。</p>
                             </div>
                           ) : null;
                         })()}
@@ -5261,21 +5261,21 @@ const App = () => {
 
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
                         {/* Left Side: Samples */}
-                        <div ref={dimLeftPanelRef} className="lg:col-span-1 bg-slate-800 rounded-3xl p-6 space-y-6 border border-slate-700 shadow-inner h-fit">
+                        <div ref={dimLeftPanelRef} className={`lg:col-span-1 rounded-3xl p-6 space-y-6 shadow-inner h-fit ${isBright ? 'bg-white border border-slate-200' : 'bg-slate-800 border border-slate-700'}`}>
                           <div className="space-y-3">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2"><TableIcon size={12} /> NAMING CONVENTION SAMPLES</p>
-                            <div className="bg-indigo-950/40 border border-indigo-800/30 rounded-xl px-3 py-2.5">
-                              <p className="text-[10px] text-indigo-300/90 leading-relaxed">左侧展示你广告数据中实际使用的命名样本，右侧则根据这些命名定义拆分规则。请确保命名格式统一，以便系统准确拆解维度。</p>
+                            <p className={`text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2 ${isBright ? 'text-slate-500' : 'text-slate-400'}`}><TableIcon size={12} /> NAMING CONVENTION SAMPLES</p>
+                            <div className={isBright ? 'bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2.5' : 'bg-indigo-950/40 border border-indigo-800/30 rounded-xl px-3 py-2.5'}>
+                              <p className={`text-[10px] leading-relaxed ${isBright ? 'text-indigo-800' : 'text-indigo-300/90'}`}>左侧展示你广告数据中实际使用的命名样本，右侧则根据这些命名定义拆分规则。请确保命名格式统一，以便系统准确拆解维度。</p>
                             </div>
                           </div>
 
                           {/* Platform Selector */}
-                          <div className="flex bg-slate-900 p-1 rounded-xl">
+                          <div className={`flex p-1 rounded-xl ${isBright ? 'bg-slate-100' : 'bg-slate-900'}`}>
                             {['facebook', 'google'].map(p => (
                               <button
                                 key={p}
                                 onClick={() => setActivePlatformTab(p as any)}
-                                className={`flex-1 px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${activePlatformTab === p ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
+                                className={`flex-1 px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${activePlatformTab === p ? (isBright ? 'bg-indigo-100 text-indigo-900 shadow border border-indigo-200' : 'bg-indigo-600 text-white shadow-md') : (isBright ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-200' : 'text-slate-400 hover:text-slate-200')}`}
                               >
                                 {p === 'facebook' ? 'Meta' : 'Google'}
                               </button>
@@ -5285,13 +5285,13 @@ const App = () => {
                           {/* Google Type Selector */}
                           {activePlatformTab === 'google' && (
                             <div className="space-y-2">
-                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Google Ad Type</p>
+                              <p className={`text-[9px] font-black uppercase tracking-widest ${isBright ? 'text-slate-500' : 'text-slate-400'}`}>Google Ad Type</p>
                               <div className="flex flex-col gap-1.5">
                                 {GOOGLE_TYPES.map(t => (
                                   <button
                                     key={t}
                                     onClick={() => setActiveGoogleType(t)}
-                                    className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all text-left ${activeGoogleType === t ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 bg-slate-900 hover:text-slate-200 hover:bg-slate-900/70'}`}
+                                    className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all text-left ${activeGoogleType === t ? (isBright ? 'bg-indigo-100 text-indigo-900 shadow border border-indigo-200' : 'bg-indigo-600 text-white shadow-md') : (isBright ? 'text-slate-600 bg-white hover:text-slate-900 hover:bg-slate-100 border border-slate-200' : 'text-slate-400 bg-slate-900 hover:text-slate-200 hover:bg-slate-900/70')}`}
                                   >
                                     {t.replace('_', ' ')}
                                   </button>
@@ -5302,13 +5302,13 @@ const App = () => {
 
                           {/* Segment 数据层级选择 */}
                           <div className="space-y-2">
-                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Segment 数据层级</p>
+                            <p className={`text-[9px] font-black uppercase tracking-widest ${isBright ? 'text-slate-500' : 'text-slate-400'}`}>Segment 数据层级</p>
                             <div className="flex flex-col gap-1.5">
                               {getSegmentOptions(activePlatformTab, activePlatformTab === 'google' ? activeGoogleType : undefined).map(opt => (
                                 <button
                                   key={opt.key}
                                   onClick={() => setActiveSegment(opt.key)}
-                                  className={`px-3 py-2 rounded-lg text-[9px] font-black transition-all text-left ${activeSegment === opt.key ? 'bg-purple-600 text-white shadow-md' : 'text-slate-400 bg-slate-900 hover:text-slate-200 hover:bg-slate-900/70'}`}
+                                  className={`px-3 py-2 rounded-lg text-[9px] font-black transition-all text-left ${activeSegment === opt.key ? (isBright ? 'bg-purple-100 text-purple-900 shadow border border-purple-200' : 'bg-purple-600 text-white shadow-md') : (isBright ? 'text-slate-600 bg-white hover:text-slate-900 hover:bg-slate-100 border border-slate-200' : 'text-slate-400 bg-slate-900 hover:text-slate-200 hover:bg-slate-900/70')}`}
                                 >
                                   {opt.label}
                                 </button>
@@ -5318,57 +5318,57 @@ const App = () => {
 
                           <div className="space-y-4">
                             {/* 通用：Campaign Name / Ad Set Name / Ad Name（所有平台/类型） */}
-                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Campaign Name Sample</label>
-                              <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.campaign}>{namingSamples.campaign || 'N/A'}</div>
+                            <div className={isBright ? 'bg-slate-50 p-4 rounded-2xl border border-slate-200' : 'bg-slate-900/50 p-4 rounded-2xl border border-slate-800'}>
+                              <label className={`text-[9px] font-black uppercase block mb-1 ${isBright ? 'text-slate-500' : 'text-slate-400'}`}>Campaign Name Sample</label>
+                              <div className={`rounded-xl p-3 text-[11px] font-medium overflow-hidden text-ellipsis whitespace-nowrap shadow-sm ${isBright ? 'bg-white border border-slate-200 text-slate-800' : 'bg-slate-900 border border-slate-700 text-slate-200'}`} title={namingSamples.campaign}>{namingSamples.campaign || 'N/A'}</div>
                             </div>
-                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Ad Set Name Sample</label>
-                              <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.adSet}>{namingSamples.adSet || 'N/A'}</div>
+                            <div className={isBright ? 'bg-slate-50 p-4 rounded-2xl border border-slate-200' : 'bg-slate-900/50 p-4 rounded-2xl border border-slate-800'}>
+                              <label className={`text-[9px] font-black uppercase block mb-1 ${isBright ? 'text-slate-500' : 'text-slate-400'}`}>Ad Set Name Sample</label>
+                              <div className={`rounded-xl p-3 text-[11px] font-medium overflow-hidden text-ellipsis whitespace-nowrap shadow-sm ${isBright ? 'bg-white border border-slate-200 text-slate-800' : 'bg-slate-900 border border-slate-700 text-slate-200'}`} title={namingSamples.adSet}>{namingSamples.adSet || 'N/A'}</div>
                             </div>
-                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Ad Name Sample</label>
-                              <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.ad}>{namingSamples.ad || 'N/A'}</div>
+                            <div className={isBright ? 'bg-slate-50 p-4 rounded-2xl border border-slate-200' : 'bg-slate-900/50 p-4 rounded-2xl border border-slate-800'}>
+                              <label className={`text-[9px] font-black uppercase block mb-1 ${isBright ? 'text-slate-500' : 'text-slate-400'}`}>Ad Name Sample</label>
+                              <div className={`rounded-xl p-3 text-[11px] font-medium overflow-hidden text-ellipsis whitespace-nowrap shadow-sm ${isBright ? 'bg-white border border-slate-200 text-slate-800' : 'bg-slate-900 border border-slate-700 text-slate-200'}`} title={namingSamples.ad}>{namingSamples.ad || 'N/A'}</div>
                             </div>
 
                             {/* Google Search 专属：Search keyword / Search term */}
                             {activePlatformTab === 'google' && activeGoogleType === 'SEARCH' && (
                               <>
-                                <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                                  <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Search keyword</label>
-                                  <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={(namingSamples as Record<string, string>).searchKeyword}>{(namingSamples as Record<string, string>).searchKeyword || 'N/A'}</div>
+                                <div className={isBright ? 'bg-slate-50 p-4 rounded-2xl border border-slate-200' : 'bg-slate-900/50 p-4 rounded-2xl border border-slate-800'}>
+                                  <label className={`text-[9px] font-black uppercase block mb-1 ${isBright ? 'text-slate-500' : 'text-slate-400'}`}>Search keyword</label>
+                                  <div className={`rounded-xl p-3 text-[11px] font-medium overflow-hidden text-ellipsis whitespace-nowrap shadow-sm ${isBright ? 'bg-white border border-slate-200 text-slate-800' : 'bg-slate-900 border border-slate-700 text-slate-200'}`} title={(namingSamples as Record<string, string>).searchKeyword}>{(namingSamples as Record<string, string>).searchKeyword || 'N/A'}</div>
                                 </div>
-                                <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                                  <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Search term</label>
-                                  <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={(namingSamples as Record<string, string>).searchTerm}>{(namingSamples as Record<string, string>).searchTerm || 'N/A'}</div>
+                                <div className={isBright ? 'bg-slate-50 p-4 rounded-2xl border border-slate-200' : 'bg-slate-900/50 p-4 rounded-2xl border border-slate-800'}>
+                                  <label className={`text-[9px] font-black uppercase block mb-1 ${isBright ? 'text-slate-500' : 'text-slate-400'}`}>Search term</label>
+                                  <div className={`rounded-xl p-3 text-[11px] font-medium overflow-hidden text-ellipsis whitespace-nowrap shadow-sm ${isBright ? 'bg-white border border-slate-200 text-slate-800' : 'bg-slate-900 border border-slate-700 text-slate-200'}`} title={(namingSamples as Record<string, string>).searchTerm}>{(namingSamples as Record<string, string>).searchTerm || 'N/A'}</div>
                                 </div>
                               </>
                             )}
 
                             {/* 通用：age / gender（所有平台/类型均展示） */}
-                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Age</label>
-                              <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.age}>{namingSamples.age || 'N/A'}</div>
+                            <div className={isBright ? 'bg-slate-50 p-4 rounded-2xl border border-slate-200' : 'bg-slate-900/50 p-4 rounded-2xl border border-slate-800'}>
+                              <label className={`text-[9px] font-black uppercase block mb-1 ${isBright ? 'text-slate-500' : 'text-slate-400'}`}>Age</label>
+                              <div className={`rounded-xl p-3 text-[11px] font-medium overflow-hidden text-ellipsis whitespace-nowrap shadow-sm ${isBright ? 'bg-white border border-slate-200 text-slate-800' : 'bg-slate-900 border border-slate-700 text-slate-200'}`} title={namingSamples.age}>{namingSamples.age || 'N/A'}</div>
                             </div>
-                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Gender</label>
-                              <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={namingSamples.gender}>{namingSamples.gender || 'N/A'}</div>
+                            <div className={isBright ? 'bg-slate-50 p-4 rounded-2xl border border-slate-200' : 'bg-slate-900/50 p-4 rounded-2xl border border-slate-800'}>
+                              <label className={`text-[9px] font-black uppercase block mb-1 ${isBright ? 'text-slate-500' : 'text-slate-400'}`}>Gender</label>
+                              <div className={`rounded-xl p-3 text-[11px] font-medium overflow-hidden text-ellipsis whitespace-nowrap shadow-sm ${isBright ? 'bg-white border border-slate-200 text-slate-800' : 'bg-slate-900 border border-slate-700 text-slate-200'}`} title={namingSamples.gender}>{namingSamples.gender || 'N/A'}</div>
                             </div>
 
                             {/* Country（Meta 与 Google 均支持 country 层级） */}
-                            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Country</label>
-                              <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-[11px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap shadow-sm" title={(namingSamples as Record<string, string>).country}>{(namingSamples as Record<string, string>).country || 'N/A'}</div>
+                            <div className={isBright ? 'bg-slate-50 p-4 rounded-2xl border border-slate-200' : 'bg-slate-900/50 p-4 rounded-2xl border border-slate-800'}>
+                              <label className={`text-[9px] font-black uppercase block mb-1 ${isBright ? 'text-slate-500' : 'text-slate-400'}`}>Country</label>
+                              <div className={`rounded-xl p-3 text-[11px] font-medium overflow-hidden text-ellipsis whitespace-nowrap shadow-sm ${isBright ? 'bg-white border border-slate-200 text-slate-800' : 'bg-slate-900 border border-slate-700 text-slate-200'}`} title={(namingSamples as Record<string, string>).country}>{(namingSamples as Record<string, string>).country || 'N/A'}</div>
                             </div>
 
                             {/* Google Demand Gen 专属：全部列维度样本 */}
                             {activePlatformTab === 'google' && activeGoogleType === 'DEMAND_GEN' && (
                               <div className="space-y-2 max-h-[320px] overflow-y-auto custom-scrollbar">
-                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest sticky top-0 bg-slate-800 py-1">Demand Gen 列维度样本</p>
+                                <p className={`text-[9px] font-black uppercase tracking-widest sticky top-0 py-1 ${isBright ? 'text-slate-500 bg-white' : 'text-slate-400 bg-slate-800'}`}>Demand Gen 列维度样本</p>
                                 {(['adStatus', 'adType', 'devicePreference', 'headline', 'longHeadline', 'description', 'businessName', 'imageId', 'squareImageId', 'portraitImageId', 'logoImageId', 'landscapeLogoId', 'videoId', 'callToActionText', 'callToActionHeadline', 'finalUrl', 'appFinalUrl', 'displayUrl', 'trackingUrlTemplate', 'finalUrlSuffix', 'customerParam'] as const).map(src => (
-                                  <div key={src} className="bg-slate-900/50 p-2 rounded-xl border border-slate-800">
-                                    <label className="text-[8px] font-black text-slate-500 uppercase block mb-0.5">{getColumnNameForSource(src)}</label>
-                                    <div className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] font-medium text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap" title={(namingSamples as Record<string, string>)[src]}>{(namingSamples as Record<string, string>)[src] || 'N/A'}</div>
+                                  <div key={src} className={isBright ? 'bg-slate-50 p-2 rounded-xl border border-slate-200' : 'bg-slate-900/50 p-2 rounded-xl border border-slate-800'}>
+                                    <label className={`text-[8px] font-black uppercase block mb-0.5 ${isBright ? 'text-slate-500' : 'text-slate-500'}`}>{getColumnNameForSource(src)}</label>
+                                    <div className={`rounded-lg px-2 py-1.5 text-[10px] font-medium overflow-hidden text-ellipsis whitespace-nowrap ${isBright ? 'bg-white border border-slate-200 text-slate-800' : 'bg-slate-900 border border-slate-700 text-slate-200'}`} title={(namingSamples as Record<string, string>)[src]}>{(namingSamples as Record<string, string>)[src] || 'N/A'}</div>
                                   </div>
                                 ))}
                               </div>
@@ -5389,9 +5389,9 @@ const App = () => {
                             const sampleParts = sampleStr ? sampleStr.split(currentDelimiter) : [];
                             const showIndexDropdown = !isDirect && !isColumnSource;
                             return (
-                              <div key={dim} className="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-slate-800 rounded-2xl border border-slate-700 shadow-sm group hover:border-purple-700 transition-all relative">
+                              <div key={dim} className={`flex flex-col md:flex-row md:items-center gap-2 p-3 rounded-2xl shadow-sm group transition-all relative ${isBright ? 'bg-white border border-slate-200 hover:border-purple-300' : 'bg-slate-800 border border-slate-700 hover:border-purple-700'}`}>
                                 <div className="md:w-36 flex items-center justify-between shrink-0">
-                                  <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">{dim}</span>
+                                  <span className={`text-[10px] font-black uppercase tracking-widest ${isBright ? 'text-slate-800' : 'text-slate-200'}`}>{dim}</span>
                                   <button
                                     type="button"
                                     onClick={() => handleRemoveDimension(dim)}
@@ -5402,7 +5402,7 @@ const App = () => {
                                   </button>
                                 </div>
                                 <div className="grid grid-cols-12 gap-2 flex-1 w-full min-w-0">
-                                  <select className="col-span-12 lg:col-span-5 min-w-0 bg-slate-900 text-[10px] font-black px-3 py-2.5 rounded-xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.source || ''} onChange={e => {
+                                  <select className={`col-span-12 lg:col-span-5 min-w-0 text-[10px] font-black px-3 py-2.5 rounded-xl outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors ${isBright ? 'bg-white border border-slate-200 text-slate-900' : 'bg-slate-900 border border-slate-700 text-white'}`} value={existing?.source || ''} onChange={e => {
                                     const source = e.target.value as any;
                                     if (source) setDimConfigs(p => [...p.filter(x => x.label !== dim), { label: dim, source, index: ALL_COLUMN_SOURCES.includes(source) ? -1 : (existing?.index ?? 0), delimiter: existing?.delimiter || '_' }]);
                                   }}>
@@ -5444,7 +5444,7 @@ const App = () => {
                                       <option value="customerParam">Custom parameter</option>
                                     </optgroup>
                                   </select>
-                                  <select className={`${showIndexDropdown ? 'col-span-6 lg:col-span-3' : 'col-span-12 lg:col-span-7'} min-w-0 bg-slate-900 text-[10px] font-black px-2 py-2.5 rounded-xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-center text-white`} value={segmentStyle} onChange={e => {
+                                  <select className={`${showIndexDropdown ? 'col-span-6 lg:col-span-3' : 'col-span-12 lg:col-span-7'} min-w-0 text-[10px] font-black px-2 py-2.5 rounded-xl outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-center ${isBright ? 'bg-white border border-slate-200 text-slate-900' : 'bg-slate-900 border border-slate-700 text-white'}`} value={segmentStyle} onChange={e => {
                                     const v = e.target.value;
                                     if (v === 'direct') {
                                       if (existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, index: -1 }]);
@@ -5461,7 +5461,7 @@ const App = () => {
                                     <option value="-">- (中划线 | Hyphen)</option>
                                   </select>
                                   {showIndexDropdown && (
-                                    <select className="col-span-6 lg:col-span-4 min-w-0 bg-slate-900 text-[10px] font-black px-2 py-2.5 rounded-xl border border-slate-700 outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors text-white" value={existing?.index ?? 0} onChange={e => {
+                                    <select className={`col-span-6 lg:col-span-4 min-w-0 text-[10px] font-black px-2 py-2.5 rounded-xl outline-none appearance-none cursor-pointer focus:border-indigo-400 transition-colors ${isBright ? 'bg-white border border-slate-200 text-slate-900' : 'bg-slate-900 border border-slate-700 text-white'}`} value={existing?.index ?? 0} onChange={e => {
                                       const index = parseInt(e.target.value, 10);
                                       if (!isNaN(index) && existing) setDimConfigs(p => [...p.filter(x => x.label !== dim), { ...existing, index }]);
                                       else if (!isNaN(index)) setDimConfigs(p => [...p, { label: dim, source: currentSource as any, index, delimiter: currentDelimiter }]);
@@ -5482,12 +5482,12 @@ const App = () => {
 
                           <div className="p-1">
                             {isAddingDimension ? (
-                              <div className="flex items-center gap-2 p-3 bg-slate-800 rounded-2xl border-2 border-indigo-700 border-dashed animate-in fade-in zoom-in duration-300">
-                                <span className="md:w-28 text-[9px] font-black text-indigo-400 uppercase tracking-widest shrink-0">New Dimension</span>
+                              <div className={`flex items-center gap-2 p-3 rounded-2xl border-2 border-dashed animate-in fade-in zoom-in duration-300 ${isBright ? 'bg-slate-50 border-indigo-300' : 'bg-slate-800 border-indigo-700'}`}>
+                                <span className={`md:w-28 text-[9px] font-black uppercase tracking-widest shrink-0 ${isBright ? 'text-indigo-700' : 'text-indigo-400'}`}>New Dimension</span>
                                 <div className="flex flex-1 gap-2 min-w-0">
                                   <input
                                     autoFocus
-                                    className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-[10px] font-black outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-900/20 transition-all text-white"
+                                    className={`flex-1 min-w-0 rounded-xl px-3 py-2.5 text-[10px] font-black outline-none focus:ring-2 transition-all ${isBright ? 'bg-white border border-slate-200 text-slate-900 focus:border-indigo-400 focus:ring-indigo-100' : 'bg-slate-900 border border-slate-700 text-white focus:border-indigo-400 focus:ring-indigo-900/20'}`}
                                     placeholder="输入自定义维度名称..."
                                     value={newDimensionName}
                                     onChange={e => setNewDimensionName(e.target.value)}
@@ -5496,12 +5496,12 @@ const App = () => {
                                       if (e.key === 'Escape') setIsAddingDimension(false);
                                     }}
                                   />
-                                  <button onClick={handleAddDimension} className="bg-indigo-600 text-white px-4 py-2.5 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-900/20 transition-all font-black text-[10px] min-w-[64px] shrink-0">确认</button>
-                                  <button onClick={() => setIsAddingDimension(false)} className="bg-slate-900 text-slate-400 px-4 py-2.5 rounded-xl hover:bg-slate-800 border border-slate-700 transition-all font-black text-[10px] min-w-[64px] shrink-0">取消</button>
+                                  <button onClick={handleAddDimension} className={isBright ? 'bg-indigo-100 text-indigo-900 px-4 py-2.5 rounded-xl hover:bg-indigo-200 border border-indigo-200 transition-all font-black text-[10px] min-w-[64px] shrink-0' : 'bg-indigo-600 text-white px-4 py-2.5 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-900/20 transition-all font-black text-[10px] min-w-[64px] shrink-0'}>确认</button>
+                                  <button onClick={() => setIsAddingDimension(false)} className={isBright ? 'bg-white text-slate-600 px-4 py-2.5 rounded-xl hover:bg-slate-100 border border-slate-200 transition-all font-black text-[10px] min-w-[64px] shrink-0' : 'bg-slate-900 text-slate-400 px-4 py-2.5 rounded-xl hover:bg-slate-800 border border-slate-700 transition-all font-black text-[10px] min-w-[64px] shrink-0'}>取消</button>
                                 </div>
                               </div>
                             ) : (
-                              <button onClick={() => setIsAddingDimension(true)} className="w-full py-3 border-2 border-dashed border-slate-700 rounded-2xl flex items-center justify-center gap-2 text-slate-400 hover:text-indigo-400 hover:border-indigo-700 hover:bg-indigo-900/20 transition-all font-black text-[10px] uppercase tracking-widest group">
+                              <button onClick={() => setIsAddingDimension(true)} className={`w-full py-3 border-2 border-dashed rounded-2xl flex items-center justify-center gap-2 font-black text-[10px] uppercase tracking-widest group transition-all ${isBright ? 'border-slate-300 text-slate-600 hover:text-indigo-700 hover:border-indigo-400 hover:bg-indigo-50' : 'border-slate-700 text-slate-400 hover:text-indigo-400 hover:border-indigo-700 hover:bg-indigo-900/20'}`}>
                                 <Plus size={16} className="group-hover:scale-110 transition-transform" /> 增加自定义维度
                               </button>
                             )}
