@@ -212,6 +212,9 @@ interface PivotFilterGroup {
   conditions: PivotFilterCondition[];
 }
 
+/** 透视表维度汇总映射：仅透视表内生效，原始名 -> 汇总名 */
+export type PivotDimensionGroupMaps = Record<string, Record<string, string>>;
+
 /** 透视报告预设：用户保存的命名配置 */
 interface PivotPreset {
   id: string;
@@ -225,6 +228,8 @@ interface PivotPreset {
   display: { showSubtotal: boolean; showGrandTotal: boolean; totalAxis: 'row' | 'column' };
   platformScopes: PivotPlatformScope[];
   segmentMode?: PivotSegmentMode;
+  /** 透视分组映射（Campaign/Ad Set/Ad 原始名->汇总名），仅透视表生效 */
+  dimensionGroupMaps?: PivotDimensionGroupMaps;
 }
 
 const PIVOT_PRESETS_STORAGE_PREFIX = 'pivotPresets_';
@@ -1055,6 +1060,18 @@ const App = () => {
   const [activePivotPresetId, setActivePivotPresetId] = useState<string | null>(null);
   /** 更新当前报告设置完成后的弱提示 */
   const [pivotUpdateHintVisible, setPivotUpdateHintVisible] = useState(false);
+  /** 透视表专属：维度汇总映射（仅透视表内生效），Campaign/Ad Set/Ad 原始名 -> 汇总名 */
+  const [pivotDimensionGroupMaps, setPivotDimensionGroupMaps] = useState<PivotDimensionGroupMaps>({});
+  /** 透视分组区块展开/收起，默认收起 */
+  const [isPivotGroupMapsExpanded, setIsPivotGroupMapsExpanded] = useState(false);
+  /** 抽屉打开时强制透视分组为收起 */
+  const prevPivotDrawerOpen = useRef(false);
+  useEffect(() => {
+    if (isPivotDrawerOpen && !prevPivotDrawerOpen.current) {
+      setIsPivotGroupMapsExpanded(false);
+    }
+    prevPivotDrawerOpen.current = isPivotDrawerOpen;
+  }, [isPivotDrawerOpen]);
   /** 修改报告名称：正在编辑的报告 id，非空时显示重命名弹窗 */
   const [renamePresetId, setRenamePresetId] = useState<string | null>(null);
   const [renamePresetNameInput, setRenamePresetNameInput] = useState('');
@@ -2119,6 +2136,14 @@ const App = () => {
     return row._dims[fieldKey] || 'Other';
   };
 
+  /** 透视表内使用的维度值：若配置了「透视分组」映射则返回汇总名，否则与 getPivotDimValue 一致 */
+  const getPivotDimValueResolved = (row: any, fieldKey: string): string => {
+    const raw = getPivotDimValue(row, fieldKey);
+    const map = pivotDimensionGroupMaps[fieldKey];
+    if (map && map[raw] !== undefined) return map[raw];
+    return raw;
+  };
+
   const pivotPlatformScopedData = useMemo(() => {
     if (pivotPlatformScopes.length === 0) return [];
     const scopeSet = new Set(pivotPlatformScopes);
@@ -2167,7 +2192,7 @@ const App = () => {
     pivotDimensionFields.forEach(f => { sets[f.key] = new Set(); });
     pivotPlatformScopedData.forEach(row => {
       pivotDimensionFields.forEach(f => {
-        sets[f.key].add(String(getPivotDimValue(row, f.key)));
+        sets[f.key].add(String(getPivotDimValueResolved(row, f.key)));
       });
     });
     const result: Record<string, string[]> = {};
@@ -2175,11 +2200,11 @@ const App = () => {
       result[k] = Array.from(sets[k]).sort();
     });
     return result;
-  }, [pivotPlatformScopedData, pivotDimensionFields]);
+  }, [pivotPlatformScopedData, pivotDimensionFields, pivotDimensionGroupMaps]);
 
-  /** 单条条件对一行的匹配结果 */
+  /** 单条条件对一行的匹配结果（使用透视分组后的维度值） */
   const evalPivotCondition = (row: any, c: PivotFilterCondition): boolean => {
-    const rawVal = String(getPivotDimValue(row, c.fieldKey) || '');
+    const rawVal = String(getPivotDimValueResolved(row, c.fieldKey) || '');
     if (c.mode === 'date_range') {
       if (c.dateRange.start && rawVal < c.dateRange.start) return false;
       if (c.dateRange.end && rawVal > c.dateRange.end) return false;
@@ -2207,7 +2232,7 @@ const App = () => {
       });
       return pivotFilterGroupLogic === 'and' ? groupResults.every(Boolean) : groupResults.some(Boolean);
     });
-  }, [pivotPlatformScopedData, pivotFilterGroups, pivotFilterGroupLogic]);
+  }, [pivotPlatformScopedData, pivotFilterGroups, pivotFilterGroupLogic, pivotDimensionGroupMaps]);
 
   const pivotResult = useMemo(() => {
     if (pivotValues.length === 0) return null;
@@ -2233,8 +2258,8 @@ const App = () => {
     };
 
     pivotFilteredData.forEach(row => {
-      const rowArr = rowDims.length ? rowDims.map(d => String(getPivotDimValue(row, d))) : [];
-      const colArr = colDims.length ? colDims.map(d => String(getPivotDimValue(row, d))) : [];
+      const rowArr = rowDims.length ? rowDims.map(d => String(getPivotDimValueResolved(row, d))) : [];
+      const colArr = colDims.length ? colDims.map(d => String(getPivotDimValueResolved(row, d))) : [];
       const rowKey = rowDims.length ? makeKey(rowArr) : '__all__';
       const colKey = colDims.length ? makeKey(colArr) : '__all__';
       ensureKey(rowKey, rowKeyMap, rowOrder, rowArr);
@@ -2384,7 +2409,7 @@ const App = () => {
       rows: rowsForRender,
       baseKeySet,
     };
-  }, [pivotValues, pivotRows, pivotColumns, pivotFilteredData, pivotDisplay, formulaByName, customMetricLabels]);
+  }, [pivotValues, pivotRows, pivotColumns, pivotFilteredData, pivotDisplay, formulaByName, customMetricLabels, pivotDimensionGroupMaps]);
 
   const pivotValueMeta = useMemo(() => {
     const map = new Map<string, { format: 'currency' | 'percent' | 'number'; label: string }>();
@@ -2997,6 +3022,7 @@ const App = () => {
       display: { ...pivotDisplay },
       platformScopes: [...pivotPlatformScopes],
       segmentMode: pivotSegmentMode,
+      dimensionGroupMaps: Object.keys(pivotDimensionGroupMaps).length ? { ...pivotDimensionGroupMaps } : undefined,
     };
     setPivotPresets(prev => {
       const next = [...prev, preset];
@@ -3075,6 +3101,7 @@ const App = () => {
     setPivotColumns(finalCols);
     setPivotValues(finalVals);
     setPivotDisplay({ ...preset.display });
+    setPivotDimensionGroupMaps(preset.dimensionGroupMaps && typeof preset.dimensionGroupMaps === 'object' ? { ...preset.dimensionGroupMaps } : {});
     // 先提交行/列/值，再关闭下拉，避免同批 setState 时下拉卸载影响透视状态生效
     queueMicrotask(() => {
       setIsPivotPresetDropdownOpen(false);
@@ -3115,6 +3142,7 @@ const App = () => {
       display: { ...pivotDisplay },
       platformScopes: [...pivotPlatformScopes],
       segmentMode: pivotSegmentMode,
+      dimensionGroupMaps: Object.keys(pivotDimensionGroupMaps).length ? { ...pivotDimensionGroupMaps } : undefined,
     };
     setPivotPresets(prev => {
       const next = prev.map(p => (p.id === id ? updated : p));
@@ -3999,6 +4027,124 @@ const App = () => {
                       {pivotSegmentMode === 'age_gender' && '同时查看年龄+性别维度拆分数据（仅 Meta 有此层级，Google 回退默认）'}
                     </div>
                   </div>
+
+                  {/* 透视分组：Campaign / Ad Set / Ad 原始名 -> 汇总名，仅本透视表生效，可展开收起 */}
+                  {(() => {
+                    const pivotGroupMapsCount = (['Campaign', 'Ad Set', 'Ad'] as const).reduce(
+                      (sum, dim) => sum + Object.keys(pivotDimensionGroupMaps[dim] || {}).length,
+                      0
+                    );
+                    return (
+                      <div className={`rounded-2xl border overflow-hidden ${isBright ? 'bg-amber-50/80 border-amber-200' : 'bg-amber-950/30 border-amber-800/50'}`}>
+                        <button
+                          type="button"
+                          onClick={() => setIsPivotGroupMapsExpanded(prev => !prev)}
+                          className={`w-full flex items-center justify-between gap-2 p-3 text-left ${isBright ? 'hover:bg-amber-100/80' : 'hover:bg-amber-900/20'}`}
+                        >
+                          <span className={`text-[11px] font-black uppercase tracking-widest ${isBright ? 'text-amber-800' : 'text-amber-400'}`}>
+                            透视分组
+                            {pivotGroupMapsCount > 0 && (
+                              <span className={`ml-1.5 font-normal normal-case tracking-normal ${isBright ? 'text-amber-700' : 'text-amber-500'}`}>
+                                （已配置 {pivotGroupMapsCount} 条）
+                              </span>
+                            )}
+                          </span>
+                          <ChevronDown size={14} className={`shrink-0 transition-transform duration-200 ${isBright ? 'text-amber-700' : 'text-amber-500'} ${isPivotGroupMapsExpanded ? 'rotate-180' : ''}`} />
+                        </button>
+                        {isPivotGroupMapsExpanded && (
+                          <div className="px-3 pb-3 space-y-3 border-t border-amber-200/50">
+                            <p className={`text-[10px] pt-3 ${isBright ? 'text-slate-600' : 'text-slate-400'}`}>
+                              将同一维度下不同原始名称归为同一汇总名，行/列/筛选均按汇总名展示与聚合。
+                            </p>
+                            {(['Campaign', 'Ad Set', 'Ad'] as const).map(dimLabel => {
+                      const map = pivotDimensionGroupMaps[dimLabel] || {};
+                      const entries = Object.entries(map);
+                      return (
+                        <div key={dimLabel} className={`rounded-xl p-2.5 space-y-1.5 ${isBright ? 'bg-white border border-amber-200' : 'bg-slate-900/50 border border-amber-800/30'}`}>
+                          <span className={`text-[10px] font-bold ${isBright ? 'text-slate-700' : 'text-slate-300'}`}>{dimLabel}</span>
+                          <div className="space-y-1 max-h-24 overflow-y-auto custom-scrollbar">
+                            {entries.map(([rawName, groupKey]) => (
+                              <div key={rawName} className="flex items-center gap-2 flex-wrap">
+                                <span className={`flex-1 min-w-0 truncate text-[10px] ${isBright ? 'text-slate-600' : 'text-slate-400'}`} title={rawName}>{rawName}</span>
+                                <span className={isBright ? 'text-slate-400' : 'text-slate-500'}>→</span>
+                                <span className={`flex-1 min-w-0 truncate text-[10px] font-medium ${isBright ? 'text-amber-800' : 'text-amber-400'}`} title={groupKey}>{groupKey}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setPivotDimensionGroupMaps(prev => {
+                                    const current = { ...(prev[dimLabel] || {}) };
+                                    delete current[rawName];
+                                    return { ...prev, [dimLabel]: current };
+                                  })}
+                                  className={`p-1 rounded ${isBright ? 'text-slate-400 hover:bg-red-100 hover:text-red-600' : 'text-slate-500 hover:bg-red-900/30 hover:text-red-400'}`}
+                                  title="删除"
+                                >
+                                  <Trash2 size={11} />
+                                </button>
+                              </div>
+                            ))}
+                            {entries.length === 0 && <p className={`text-[10px] ${isBright ? 'text-slate-500' : 'text-slate-500'}`}>暂无映射</p>}
+                          </div>
+                          <div className="flex gap-1.5 flex-wrap" data-pivot-group-dim={dimLabel}>
+                            <input
+                              id={`pivot-group-raw-${dimLabel.replace(/\s/g, '-')}`}
+                              placeholder="原始名称"
+                              className={`flex-1 min-w-[80px] rounded-lg px-2 py-1 text-[10px] outline-none ${isBright ? 'bg-white border border-slate-200 text-slate-800' : 'bg-slate-800 border border-slate-600 text-slate-200'}`}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  const raw = (e.target as HTMLInputElement).value.trim();
+                                  const groupEl = document.getElementById(`pivot-group-key-${dimLabel.replace(/\s/g, '-')}`) as HTMLInputElement | null;
+                                  const groupKey = groupEl?.value?.trim();
+                                  if (raw && groupKey) {
+                                    setPivotDimensionGroupMaps(prev => ({ ...prev, [dimLabel]: { ...(prev[dimLabel] || {}), [raw]: groupKey } }));
+                                    (e.target as HTMLInputElement).value = '';
+                                    if (groupEl) groupEl.value = '';
+                                  }
+                                }
+                              }}
+                            />
+                            <input
+                              id={`pivot-group-key-${dimLabel.replace(/\s/g, '-')}`}
+                              placeholder="汇总名称"
+                              className={`flex-1 min-w-[80px] rounded-lg px-2 py-1 text-[10px] outline-none ${isBright ? 'bg-white border border-slate-200 text-slate-800' : 'bg-slate-800 border border-slate-600 text-slate-200'}`}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  const groupKey = (e.target as HTMLInputElement).value.trim();
+                                  const rawEl = document.getElementById(`pivot-group-raw-${dimLabel.replace(/\s/g, '-')}`) as HTMLInputElement | null;
+                                  const raw = rawEl?.value?.trim();
+                                  if (raw && groupKey) {
+                                    setPivotDimensionGroupMaps(prev => ({ ...prev, [dimLabel]: { ...(prev[dimLabel] || {}), [raw]: groupKey } }));
+                                    (e.target as HTMLInputElement).value = '';
+                                    if (rawEl) rawEl.value = '';
+                                  }
+                                }
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const rawEl = document.getElementById(`pivot-group-raw-${dimLabel.replace(/\s/g, '-')}`) as HTMLInputElement | null;
+                                const groupEl = document.getElementById(`pivot-group-key-${dimLabel.replace(/\s/g, '-')}`) as HTMLInputElement | null;
+                                const raw = rawEl?.value?.trim();
+                                const groupKey = groupEl?.value?.trim();
+                                if (raw && groupKey) {
+                                  setPivotDimensionGroupMaps(prev => ({ ...prev, [dimLabel]: { ...(prev[dimLabel] || {}), [raw]: groupKey } }));
+                                  if (rawEl) rawEl.value = '';
+                                  if (groupEl) groupEl.value = '';
+                                }
+                              }}
+                              className={`px-2 py-1 rounded-lg text-[10px] font-bold shrink-0 ${isBright ? 'bg-amber-100 text-amber-900 border border-amber-200' : 'bg-amber-900/50 text-amber-300 border border-amber-700'}`}
+                            >
+                              添加
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   <div>
                     <div className={`text-[11px] font-black uppercase tracking-widest mb-3 ${isBright ? 'text-slate-600' : 'text-slate-400'}`}>筛选器</div>
