@@ -166,6 +166,7 @@ export interface ApiDataRow {
     linkUrl?: string;
     addsPaymentInfo?: number;
     costPerAddPaymentInfo?: number;
+    metaInsightsResultsJson?: string;
 }
 
 // API 响应类型

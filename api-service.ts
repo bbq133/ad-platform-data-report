@@ -267,6 +267,18 @@ export function transformApiDataToRawData(apiData: ApiDataRow[]): Record<string,
             '_raw': row
         };
 
+        if (!isGoogle && row.metaInsightsResultsJson) {
+            let mrJson: any = row.metaInsightsResultsJson;
+            if (typeof mrJson === 'string') {
+                try { mrJson = JSON.parse(mrJson); } catch { mrJson = null; }
+            }
+            if (mrJson && typeof mrJson === 'object') {
+                for (const [k, v] of Object.entries(mrJson)) {
+                    commonData[`MR:${k}`] = parseFloat(String(v)) || 0;
+                }
+            }
+        }
+
         if (isGoogle) {
             return commonData;
         }

@@ -396,6 +396,41 @@ const SEGMENT_ALLOWED_PLATFORMS: Partial<Record<PivotSegmentMode, PivotPlatformS
 };
 const DEFAULT_PIVOT_PLATFORM_SCOPES: PivotPlatformScope[] = PIVOT_PLATFORM_OPTIONS.map(o => o.key);
 
+const MR_COL_PREFIX = 'MR:';
+
+interface MrMetricDef {
+  metricKey: string;
+  colName: string;
+  defaultLabel: string;
+}
+
+function parseMrColumnName(colName: string): MrMetricDef | null {
+  if (!colName.startsWith(MR_COL_PREFIX)) return null;
+  const originalKey = colName.slice(MR_COL_PREFIX.length);
+
+  if (originalKey.startsWith('conversions:offsite_conversion.fb_pixel_custom.')) {
+    const name = originalKey.slice('conversions:offsite_conversion.fb_pixel_custom.'.length);
+    return { metricKey: `mr_custom_${name.replace(/[^a-zA-Z0-9_]/g, '_')}`, colName, defaultLabel: `${name} (Custom Conv.)` };
+  }
+  if (originalKey.startsWith('actions:offsite_conversion.fb_pixel_')) {
+    const name = originalKey.slice('actions:offsite_conversion.fb_pixel_'.length);
+    const readable = name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    return { metricKey: `mr_${name}`, colName, defaultLabel: `${readable} (Results)` };
+  }
+  if (originalKey.startsWith('conversions:')) {
+    const name = originalKey.slice('conversions:'.length);
+    const readable = name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    return { metricKey: `mr_conv_${name.replace(/[^a-zA-Z0-9_]/g, '_')}`, colName, defaultLabel: `${readable} (Conv.)` };
+  }
+  if (originalKey.startsWith('actions:')) {
+    const name = originalKey.slice('actions:'.length);
+    const readable = name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    return { metricKey: `mr_${name.replace(/[^a-zA-Z0-9_]/g, '_')}`, colName, defaultLabel: `${readable} (Actions)` };
+  }
+  const safeName = originalKey.replace(/[^a-zA-Z0-9_]/g, '_');
+  return { metricKey: `mr_${safeName}`, colName, defaultLabel: originalKey };
+}
+
 const BASE_METRICS = [
   // 核心效果指标（通用 - 所有平台）
   'cost', 'impressions', 'reach', 'clicks', 'linkClicks',
@@ -453,10 +488,14 @@ const PLATFORM_SPECIFIC_CATEGORIES: Record<string, MetricCategoryDef[]> = {
   google_SHOPPING: [],
 };
 
-/** 获取当前平台/类型的全部指标分类（共有 + 平台特有） */
-const getMetricCategories = (platform: 'facebook' | 'google', googleType?: GoogleType): MetricCategoryDef[] => {
+/** 获取当前平台/类型的全部指标分类（共有 + 平台特有 + 动态 MR） */
+const getMetricCategories = (platform: 'facebook' | 'google', googleType?: GoogleType, mrKeys?: string[]): MetricCategoryDef[] => {
   const key = platform === 'facebook' ? 'facebook' : `google_${googleType || 'PERFORMANCE_MAX'}`;
-  return [...COMMON_METRIC_CATEGORIES, ...(PLATFORM_SPECIFIC_CATEGORIES[key] || [])];
+  const cats = [...COMMON_METRIC_CATEGORIES, ...(PLATFORM_SPECIFIC_CATEGORIES[key] || [])];
+  if (platform === 'facebook' && mrKeys && mrKeys.length > 0) {
+    cats.push({ label: 'Meta Results (自定义事件)', keys: mrKeys });
+  }
+  return cats;
 };
 
 /** Meta 特有指标集合（用于公式平台归属判定） */
@@ -775,6 +814,38 @@ const App = () => {
   const [newMetricName, setNewMetricName] = useState('');
   const [isAddingMetric, setIsAddingMetric] = useState(false);
 
+  // Auto-discover Meta Results (MR:) metrics from raw data
+  const discoveredMrMetrics = useMemo<MrMetricDef[]>(() => {
+    if (!rawData.length) return [];
+    const mrCols = new Set<string>();
+    for (const row of rawData) {
+      for (const key of Object.keys(row)) {
+        if (key.startsWith(MR_COL_PREFIX)) mrCols.add(key);
+      }
+    }
+    return [...mrCols]
+      .map(colName => parseMrColumnName(colName))
+      .filter(Boolean) as MrMetricDef[];
+  }, [rawData]);
+
+  // Auto-populate labels for newly discovered MR metrics
+  useEffect(() => {
+    if (discoveredMrMetrics.length === 0) return;
+    setCustomMetricLabels(prev => {
+      const next = { ...prev };
+      let changed = false;
+      discoveredMrMetrics.forEach(m => {
+        if (!(m.metricKey in next)) {
+          next[m.metricKey] = m.defaultLabel;
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [discoveredMrMetrics]);
+
+  const discoveredMrKeys = useMemo(() => discoveredMrMetrics.map(m => m.metricKey), [discoveredMrMetrics]);
+
   const getLabelForKey = (key: string) => {
     const labels: Record<string, string> = {
       campaign: 'Campaign Name', adSet: 'Ad Set Name', ad: 'Ad Name', age: 'Age', gender: 'Gender', cost: 'Cost', leads: 'Leads',
@@ -821,7 +892,10 @@ const App = () => {
       customerParam: 'Custom parameter',
       ...customMetricLabels
     };
-    return labels[key] || key;
+    if (labels[key]) return labels[key];
+    const mrDef = discoveredMrMetrics.find(m => m.metricKey === key);
+    if (mrDef) return mrDef.defaultLabel;
+    return key;
   };
 
   const normalizeGoogleType = (value: string): GoogleType => {
@@ -864,7 +938,7 @@ const App = () => {
   };
 
   const computeHeadersBySource = (rows: RawDataRow[]) => {
-    const excluded = new Set(['__platform', '__campaignAdvertisingType', '_raw', 'Platform Identification']);
+    const excluded = new Set(['__platform', '__campaignAdvertisingType', '_raw', 'Platform Identification', '__segments']);
     const facebookSet = new Set<string>();
     const googleSets: Record<GoogleType, Set<string>> = {
       SEARCH: new Set(),
@@ -876,7 +950,7 @@ const App = () => {
 
     rows.forEach(row => {
       const platform = inferPlatformFromRow(row);
-      const keys = Object.keys(row).filter(key => !excluded.has(key));
+      const keys = Object.keys(row).filter(key => !excluded.has(key) && !key.startsWith(MR_COL_PREFIX));
       if (platform === 'facebook') {
         keys.forEach(k => facebookSet.add(k));
       } else if (platform === 'google') {
@@ -1101,16 +1175,24 @@ const App = () => {
   const pivotPresetDropdownRef = useRef<HTMLDivElement>(null);
 
   const allAvailableMetrics = useMemo(() => {
-    const baseKeys = [...BASE_METRICS, ...Object.keys(customMetricLabels)];
+    const baseKeys = [...new Set([...BASE_METRICS, ...Object.keys(customMetricLabels), ...discoveredMrKeys])];
     const base = baseKeys.map(m => ({ key: m, label: getLabelForKey(m) }));
     const calc = formulas.map(f => ({ key: f.name, label: f.name }));
     return [...base, ...calc];
-  }, [formulas, customMetricLabels]);
+  }, [formulas, customMetricLabels, discoveredMrKeys]);
 
   const biCardOptions = useMemo(() => {
     const metricOptions = allAvailableMetrics.map(m => ({ id: `metric:${m.key}`, label: m.label }));
     return [...BUILTIN_BI_CARD_OPTIONS, ...metricOptions];
   }, [allAvailableMetrics]);
+
+  const formulaMetricCategoriesWithMr = useMemo(() => {
+    const cats = [...FORMULA_METRIC_CATEGORIES];
+    if (discoveredMrKeys.length > 0) {
+      cats.push({ label: 'Meta Results (自定义事件)', keys: discoveredMrKeys });
+    }
+    return cats;
+  }, [discoveredMrKeys]);
 
   // Set initial dashboard dim when configs are ready
   useEffect(() => {
@@ -1615,6 +1697,11 @@ const App = () => {
         context[key] = colName ? parseMetricValue(row[colName]) : 0;
       });
 
+      // MR metrics: directly read from row using discovered column names
+      discoveredMrMetrics.forEach(mr => {
+        context[mr.metricKey] = parseMetricValue(row[mr.colName]);
+      });
+
       const formulaResults: Record<string, number> = {};
       formulas.forEach(f => {
         formulaResults[f.name] = evalFormula(f.formula, context);
@@ -1697,7 +1784,7 @@ const App = () => {
     }
 
     return processed;
-  }, [rawData, mappings, formulas, dimConfigs]);
+  }, [rawData, mappings, formulas, dimConfigs, discoveredMrMetrics]);
 
   const filteredData = useMemo(() => {
     let data = baseProcessedData;
@@ -3511,14 +3598,14 @@ const App = () => {
                   onClick={() => setIsBiDataSourceOpen(!isBiDataSourceOpen)}
                   className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
                     biDataSourceFilterGroups.length > 0
-                      ? 'bg-amber-600/20 text-amber-300 border border-amber-500/40'
+                      ? 'bg-slate-800/90 text-slate-400 border border-slate-600'
                       : 'bg-slate-800/80 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
                   }`}
                 >
                   <Database size={12} />
                   数据源
                   {biDataSourceFilterGroups.length > 0 && (
-                    <span className="bg-amber-500/30 text-amber-300 px-1.5 py-0.5 rounded text-[9px]">{biDataSourceFilterGroups.length}</span>
+                    <span className="bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded text-[9px]">{biDataSourceFilterGroups.length}</span>
                   )}
                   <ChevronDown size={12} className={`transition-transform duration-200 ${isBiDataSourceOpen ? 'rotate-180' : ''}`} />
                 </button>
@@ -5222,6 +5309,35 @@ const App = () => {
                             );
                           })()}
 
+                          {/* Meta Results (自定义事件) 自动发现指标 */}
+                          {activePlatformTab === 'facebook' && discoveredMrMetrics.length > 0 && (
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2 pb-1.5 border-b border-emerald-900/50">
+                                <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Meta Results (自定义事件)</span>
+                                <span className="text-[8px] text-slate-600 font-bold">{discoveredMrMetrics.length} 项</span>
+                              </div>
+                              <div className="grid grid-cols-1 gap-3">
+                                {discoveredMrMetrics.map(mr => (
+                                  <div key={mr.metricKey} className="grid grid-cols-12 items-center gap-3 group">
+                                    <div className="col-span-12 md:col-span-4">
+                                      <input
+                                        className="w-full bg-transparent border-0 border-b border-transparent hover:border-slate-600 focus:border-emerald-400 text-[8px] font-black text-slate-400 uppercase tracking-widest outline-none py-0.5 transition-colors"
+                                        value={customMetricLabels[mr.metricKey] || mr.defaultLabel}
+                                        onChange={e => setCustomMetricLabels(prev => ({ ...prev, [mr.metricKey]: e.target.value }))}
+                                        title="点击重命名此指标"
+                                      />
+                                    </div>
+                                    <div className="col-span-12 md:col-span-8 min-w-0">
+                                      <div className="bg-slate-800/50 border-2 border-slate-700/50 rounded-2xl px-4 py-3 text-[10px] font-bold text-emerald-400/70 truncate" title={mr.colName}>
+                                        ← {mr.colName.replace(MR_COL_PREFIX, '')}
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
                           {/* Inline Add Metric Card */}
                           <div className="space-y-2 pt-2">
                             <label className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">新增基础指标</label>
@@ -5925,7 +6041,7 @@ const App = () => {
               <div className="md:col-span-7 space-y-3">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">基础指标 (Metrics)</p>
                 <div className="h-48 overflow-y-auto custom-scrollbar pr-1 space-y-3">
-                  {FORMULA_METRIC_CATEGORIES.map(cat => (
+                  {formulaMetricCategoriesWithMr.map(cat => (
                     <div key={cat.label}>
                       <p className="text-[7px] font-black text-indigo-400/70 uppercase tracking-widest mb-1.5">{cat.label}</p>
                       <div className="grid grid-cols-2 gap-1.5">
